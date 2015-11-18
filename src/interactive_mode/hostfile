@@ -1,0 +1,6 @@
+head.cm.cluster
+-CPU=0
+-GPU=0
+node001.ib.cluster
+-CPU=0
+-GPU=1
