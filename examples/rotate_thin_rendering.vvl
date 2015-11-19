@@ -1,0 +1,87 @@
+def render(data, data_skel, seg_data, x, y, colors):
+
+	
+	col = float4(0)
+	tmp_col = float4(0)
+	flag = 0
+	# for top view
+	iter = orthogonal_iter(data, x, y, 1)
+		
+	for elem in iter:
+		val = point_query_3d(data, elem)
+		#new_elem = float3(elem.x*2-1058, elem.y*2-48, elem.z*2-378)
+		#val_skel = linear_query_3d(data_skel, new_elem)
+
+		#tmp_col = point_query_1d(transf, val)
+		tmp_col = transfer(val)
+		#tmp_col.w = tmp_col.w*tmp_col.w/172.0
+		#tmp_col.w = tmp_col.w#*tmp_col.w/172.0
+		if elem.x > 675 and elem.x <800 and elem.z < 375:
+			if val > 120 and val < 160:
+				a = 1000
+			else:	
+				col = alpha_compositing(col, tmp_col)
+		elif elem.x > 185 and elem.x <264 and elem.z < 375:
+			if val > 120 and val < 160: 
+				a = 1000
+			else:	
+				col = alpha_compositing(col, tmp_col)
+		else:
+			col = alpha_compositing(col, tmp_col) 
+
+
+		val_skel = 0
+		if val_skel > 100:
+			flag = 40 % 14
+			tmp_c = float3(0)
+			tmp_c = point_query_1d(colors, flag)
+			tmp_col = float4(tmp_c.x, tmp_c.y, tmp_c.z, 255) 
+			col = alpha_compositing(col, tmp_col)
+			
+			break
+			
+
+		# Segmentation
+		#val = linear_query_3d(seg_data, (elem.x - 689.5), (elem.y - 273.7), (elem.z - 433.2))
+		val = 0
+		if val > 200:
+			flag = 40 % 14
+			tmp_c = float3(0)
+			tmp_c = point_query_1d(colors, flag)
+			tmp_col = float4(tmp_c.x, tmp_c.y, tmp_c.z, 255) 
+			col = alpha_compositing(col, tmp_col)
+			break
+			
+
+	if x >= 850 and x <= 1017 and y >= 3800 and y <= 3810:
+		col = float4(0, 0, 0, 255)
+
+	col = background_white(col)
+
+
+	return RGBA(col)
+
+
+
+
+
+def main():
+
+	# 40 means 1542 skeleton
+
+	#volume = load_data_3d(DATA_PATH+"/david_8gb/new_990_860_1600.dat")
+	volume = load_data_3d(DATA_PATH+"/david_8gb/new_228.dat")
+	volume_skeleton = load_data_3d(DATA_PATH+"/david_8gb/new_skel_1542.dat")
+	segment = load_data_3d(DATA_PATH+"/david_8gb/Segmentation_1542.dat")
+	#data2 = open(DATA_PATH+'/david_8gb/origin_big.txt').readlines()
+	#data2 = open(DATA_PATH+'/david_8gb/points_larger_crop.txt').readlines()
+
+
+	colors = [[136, 46, 114], [177, 120, 166], [214, 193, 222], [25, 101, 176], [82, 137, 199], [123, 175, 222], [78, 178, 101], [144, 201, 135], [202, 224, 171], [247, 238, 85], [246, 193, 65], [241, 147, 45], [232, 96, 28], [220, 5, 12]]
+	colors = numpy.array(colors, dtype=numpy.uint8)
+
+	
+	# w/o brain
+	#result = render(volume, volume_skeleton, segment, x, y, colors, transf).range(x=200:1502, y=0:).split(result,x=2)
+
+	enable_viewer(render(volume, volume_skeleton, segment, x, y, colors).range(x=-512:512, y=-512:512).split(result,x=2), 'TFF', '3D',255)
