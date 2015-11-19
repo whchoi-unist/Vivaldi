@@ -67,6 +67,7 @@ class TFN_widget(QGLWidget):
 		glBindTexture(GL_TEXTURE_2D, 0)
 
 	def setColor(self, x, col):
+		return 
 		self.color_list[x] = col
 
 
@@ -96,6 +97,7 @@ class TFN_widget(QGLWidget):
 		glBindTexture(GL_TEXTURE_2D, 0)
 
 	def updateTexture2(self, trf):
+		#print trf
 		glBindTexture(GL_TEXTURE_2D, self.color_texId)
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, trf)
 		glBindTexture(GL_TEXTURE_2D, 0)

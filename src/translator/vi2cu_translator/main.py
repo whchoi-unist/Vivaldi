@@ -779,7 +779,7 @@ def parse_block(block='', local_dict={}):
 				code_list[0] = for_statement_line + code_list[0]
 		
 		# change return
-		print local_dict
+		#print local_dict
 		code_list = change_return(code_list, local_dict)
 		# change function
 		code_list = change_function(code_list, local_dict)
@@ -1314,7 +1314,7 @@ def vi2cu_translator(vivaldi_code='', local_dict={}):
 #	print vivaldi_code
 #	print "Z",local_dict
 	CUDA_body, return_dtype = parse_body(vivaldi_code_body=vivaldi_code_body, local_dict=local_dict)
-	print local_dict
+	#print local_dict
 	
 	
 	# add return dtype to dictionary

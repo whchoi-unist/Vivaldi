@@ -257,15 +257,17 @@ class Vivaldi_window(QtGui.QMainWindow):
 	def loadtff(self, TFF, filename):
 		TFF.transfer_function = numpy.fromstring(open(filename,'r').read(), dtype=numpy.uint8)
 		TFF.updateTexture2(TFF.transfer_function)
-		TFF.setLoadedTFF()
-		TFF.updateOverlayGL()
+		#TFF.setLoadedTFF()
+		#TFF.updateOverlayGL()
+		TFF.updateGL()
 		#self.update_widget()
 
 	def loadalpha(self, TFF, filename):
 		TFF.transfer_alpha = numpy.fromstring(open(filename,'r').read(), dtype=numpy.uint8)
 		TFF.updateTexture2(TFF.transfer_function)
-		TFF.setLoadedTFF()
-		TFF.updateOverlayGL()
+		#TFF.setLoadedTFF()
+		#TFF.updateOverlayGL()
+		TFF.updateGL()
 		#self.update_widget()
 
 	def load_tf_mv(self):	
