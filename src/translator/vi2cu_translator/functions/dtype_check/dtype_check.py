@@ -368,6 +368,12 @@ func_dict['alpha_compositing_wo_alpha'] = 'float4'
 func_dict['transfer'] = 'float4'
 func_dict['background_white'] = 'float4'
 
+
+# FREYJA
+## ARRAY
+func_dict['list'] = ''
+
+
 def get_function_return_dtype(func_name, args_list, dtype_list, local_dict):
 	sfn = func_name.strip()
 	
@@ -377,7 +383,7 @@ def get_function_return_dtype(func_name, args_list, dtype_list, local_dict):
 		dtype = dtype_list[0]
 		if dtype.endswith('_volume'):
 			dtype = dtype[:-7]
-
+		
 		in_type = dtype_convert_in_query(dtype)
 		exception_list = ['linear_gradient_2d']
 		
@@ -397,6 +403,15 @@ def get_function_return_dtype(func_name, args_list, dtype_list, local_dict):
 	if sfn in ['normalize']:
 		return dtype_list[0]
 
+	# FREYJA : ARRAY DEFINE
+	if sfn in ['list']:
+		if dtype_list[0] == "Unknown":
+			dtype = dtype_list[0]
+			found_dtype = 'float_list'
+			dtype_list[0] = found_dtype
+
+		return found_dtype
+	
 	# common functions
 	if sfn in func_dict:
 		return func_dict[sfn]
@@ -474,6 +489,9 @@ def Array_subscripting(elem_list, dtype_list):
 				dtype = dtype_list[i]
 				if dtype.endswith('_volume'):
 					dtype = dtype.replace('_volume','')
+				if dtype.endswith('_list'):
+					dtype = dtype.replace('_list','')
+	
 				
 				while i+1 < n and elem_list[i+1][0] == '[' and elem_list[i+1][-1] == ']':
 					# volume + []
@@ -521,6 +539,7 @@ def Second_level(elem_list, dtype_list, local_dict, dtype_dict):
 	while i < n:
 		flag = True
 		
+		print "HA", dtype_list[i], elem_list[i], local_dict, dtype_dict
 		if (dtype_list[i] is not 'operator' 
 			and i+1 < n and elem_list[i+1][0] == '(' 
 			and elem_list[i+1][-1] == ')'): # Function call check
@@ -555,7 +574,22 @@ def Second_level(elem_list, dtype_list, local_dict, dtype_dict):
 			new_elem_list.append(new_elem)
 			i += 1
 			flag = False
-		elif False:
+		#elif False:
+		# FREYJA : Implement Array
+		elif (elem_list[i][0] == '[' and elem_list[i][-1] == ']'):
+			prev_dtype = dtype_list[i-1]
+			prev_elem = new_elem_list[-1]
+			# define array
+			if i-1 == 0:
+				pass
+			# use of array
+			elif prev_dtype.endswith("_list"):
+				dtype = prev_dtype.replace("_list",'')
+				new_dtype_list[-1] = dtype
+				dtype_dict[prev_elem] = dtype
+			# access from []
+			else:
+				pass
 			# Array check
 			pass
 		elif i+2 < n and elem_list[i+1] == '.':
@@ -703,6 +737,7 @@ def dtype_check(elem_list, dtype_list, local_dict):
 	while i < n:
 		flag = True
 		elem = elem_list[i]
+		#if elem.endswith('_list'):
 		
 		if elem.isdigit():
 			dtype = 'integer_constant'
@@ -812,14 +847,27 @@ def dtype_check(elem_list, dtype_list, local_dict):
 		flag = True
 		if i+2 < n and elem_list[i+1] in ['=']:
 			
+
+			# FREYJA : Assign data type to Array
 			if dtype_list[i] is not 'operator' and elem_list[i+2] is not 'operator':
-				new_elem = elem_list[i]+elem_list[i+1]+elem_list[i+2]
+				if elem_list[i].startswith('[') and elem_list[i].endswith(']'):
+					new_elem = elem_list[i-1]+elem_list[i]+elem_list[i+1]+elem_list[i+2]
+				else:
+					new_elem = elem_list[i]+elem_list[i+1]+elem_list[i+2]
 				new_elem_list.append(new_elem)
 				
 				# remove constant mark
 				dtype = dtype_list[i+2]
+				#print dtype, elem_list[i-1]
 				if dtype.endswith('_constant'):
 					dtype = dtype[:-len('_constant')]
+				#if elem_list[i-1]
+				#if local_dict[new_elem].endswith('_list'):
+				#if new_elem):
+					#local_dict[new_elem] = dtype+'_list'
+				if elem_list[i-1] in local_dict:
+					if elem_list[i].startswith('['):
+						local_dict[elem_list[i-1]] = dtype.replace('integer','int')+"_list"
 				new_dtype_list.append(dtype)
 				
 				# write output value
@@ -949,8 +997,8 @@ def find_dtype(line, local_dict):
 	#####################################################################################
 	dtype_list = []
 	for elem in elem_list:
-		if elem == 'ret':
-			print elem, is_operator(elem), local_dict
+		#if elem == 'ret':
+			#print elem, is_operator(elem), local_dict
 		# check is recursive
 		if is_recursive(elem):
 			# check which parenthesis is used
@@ -977,8 +1025,9 @@ def find_dtype(line, local_dict):
 	# Data type check
 	#
 	#####################################################################################
-
+	#print "DC", elem_list, dtype_list
 	dtype_dict, dtype_list = dtype_check(elem_list, dtype_list, local_dict)
+	#print "DC", elem_list, dtype_list, dtype_dict
 	
 	# Update dictionary
 	#####################################################################################

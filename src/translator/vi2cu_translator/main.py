@@ -36,8 +36,9 @@ def get_CUDA_dtype(elem, local_dict, type):
 			if dtype == 'integer':
 				dtype = dtype.replace('integer','int')	
 		elif type == 'body':
-			#if dtype.endswith('_volume'):
-			#	dtype = dtype.replace('_volume','*')
+			# FREYJA : Change list to pointer
+			#if dtype.endswith('_list'):
+				#dtype = dtype.replace('_list','*')
 			
 			if dtype == 'integer':
 				dtype = dtype.replace('integer','int')
@@ -162,8 +163,14 @@ def change_array(code_list, local_dict):
 						p_cnt += 1
 				
 				# change to CUDA style
+				# FREYJA : detect list
 				if code[i-1:i+4] == ' list': # change if to CUDA style
-					output = output[:output.rfind('\n')-1]+output[output.rfind('\n')-1:output.rfind('    ')+4]+'float '+output[output.rfind('    ')+4:]
+					name = output[output.rfind('    ')+4:output.rfind('=')]
+					name = name.replace(' ','')
+					dtype = local_dict[name]
+					dtype = dtype.replace('_list',' ')
+					name = dtype+" "+name + " "
+					output = output[:output.rfind('\n')-1]+output[output.rfind('\n')-1:output.rfind('    ')+4]+name+output[output.rfind('='):]
 					target = '['
 					length = len(target)
 					output = output[:-3]
@@ -629,6 +636,8 @@ def add_declaration(target, local_dict, in_B, exception=[]):
 		if local_dict[elem] == 'Unknown': continue
 		if local_dict[elem].endswith('_constant'): continue
 		if local_dict[elem].endswith('_volume'): continue
+		# FREYJA : Array Implement
+		if local_dict[elem].endswith('_list'): continue
 		if local_dict[elem].endswith('_DATA_RANGE'): continue		
 		flag = False
 		if elem not in in_B: flag = True
@@ -637,6 +646,11 @@ def add_declaration(target, local_dict, in_B, exception=[]):
 		if flag:
 			dtype = get_CUDA_dtype(elem, local_dict, 'body')
 			if dtype in ['list','dict','tuple']: continue
+			# FREYJA 
+			#if dtype in ['dict', 'tuple']: continue
+			#if dtype in ['list']: 
+				#print "LIST"
+				#output = indent + u
 			output = indent + dtype + ' ' + elem + '\n' + output
 
 	return output
@@ -725,7 +739,7 @@ def parse_block(block='', local_dict={}):
 		code_list = change_WORD_OPERATOR(code_list, local_dict)
 		# FREYJA
 		# change vivaldi_list to CUDA style
-		#code_list = change_array(code_list, local_dict)
+		code_list = change_array(code_list, local_dict)
 		
 		
 		# change for statement
@@ -858,6 +872,7 @@ def parse_block(block='', local_dict={}):
 		code_list = change_WORD_OPERATOR(code_list, local_dict)
 		# FREYJA
 		# change vivaldi_list to CUDA style
+		
 		code_list = change_array(code_list, local_dict)
 		
 		# change return
