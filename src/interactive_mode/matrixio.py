@@ -175,6 +175,30 @@ def read_dat(filename, out_of_core= False):
 	data = numpy.reshape(data,shape)
 	return data
 
+# FREYJA STREAMING
+# .stream file
+# FilePrefix : img/stream@@@@.png
+# Count : 100
+# Start : 0 (default)
+
+def read_stream(filename, out_of_core = False):
+	f = open(filename)
+	file_info = {}
+
+	line = f.readline().strip()
+	while len(line) > 0:
+		if not line.startswith('#'):
+			pos = line.find(':')
+			assert(pos >= 0)
+			key = line[:pos].strip()
+			value = line[pos+1:].strip()		
+			file_info[key] = value
+
+		line = f.readline().strip()
+
+	return file_info
+
+
 def read_mhd(filename):
     f = open(filename)
     info = {}
@@ -226,7 +250,7 @@ def read_2d_data(f):
     if f.endswith('.mat'): return read_matlab(f)
     if f.endswith('.mtx'): return read_mtx(f)
     if f.endswith('.npz') or f.endswith('.npy'): return read_numpy(f)
-    if any([f.endswith(e) for e in ['.png', '.PNG', '.jpg', '.JPG', '.jpeg', '.JPEG', '.bmp', '.BMP']]):
+    if any([f.endswith(e) for e in ['.png', '.PNG', '.jpg', '.JPG', '.jpeg', '.JPEG', '.bmp', '.BMP', '.PGM']]):
 		img = Image.open(f)
 		tmp = numpy.asarray(img)
 		return tmp
@@ -288,7 +312,9 @@ def read_3d_data(f):
     if f.endswith('.nrrd'): return read_nrrd(f)
     if f.endswith('.dat'): return read_dat(f)
     if f.endswith('.mhd'): return read_mhd(f)
-    #assert False, "unknown file type: " + f
+	# FREYJA STREAMING
+    if f.endswith('.stream'): return read_stream(f)
+    #assert False, "unknown file type: " + f	
 
 
 def read_4d_data(f):
