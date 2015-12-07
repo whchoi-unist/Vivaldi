@@ -59,8 +59,11 @@ def send(data, data_package, dest=None, gpu_direct=False):
 	send_data_package(dp, dest, tag)
 
 	if log_type in ['time','all']: st = time.time()
-
-	request = comm.Isend(data, dest=dest, tag=57)
+	#FREYJA STREAMING
+	if not data_package.stream:
+		request = comm.Isend(data, dest=dest, tag=57)
+	else:
+		request = comm.Isend("STREAM", dest=dest, tag=57)
 
 	if VIVALDI_BLOCKING: MPI.Request.Wait(request)
 	else: requests.append((request, data))
@@ -118,7 +121,8 @@ def copyto(dest, source):
 	for elem in source:
 		dest[i] = elem
 		i += 1
-def load_data(data_package, data_range):
+#FREYJA STREAMING
+def load_data_VR(data_package, data_range):
 
 	if log_type in ['time','all']: st = time.time()
 	dp = data_package
@@ -217,7 +221,7 @@ def load_data(data_package, data_range):
 		bw = bytes/GIGA/t
 		name = dp.data_name
 
-		log("rank%d, \"%s\", u=%d, from harddisk to Reader CPU memory, Bytes: %.3fMB, time: %.3f ms, speed: %.3f GByte/sec"%(rank, name, u, bytes/MEGA, ms, bw),'time', log_type)
+		#log("rank%d, \"%s\", u=%d, from harddisk to Reader CPU memory, Bytes: %.3fMB, time: %.3f ms, speed: %.3f GByte/sec"%(rank, name, u, bytes/MEGA, ms, bw),'time', log_type)
 
 
 	return buf
@@ -228,9 +232,16 @@ def data_finder(u, ss, sp, gpu_direct=False, data_range=None):
 
 	cut = False
 	if data_range != None and data_range != source_package.data_range: cut = True
+# FREYJA STREAMING
+	stream = source_package.stream
 
 	out_of_core = source_package.out_of_core
-	if out_of_core:
+	if stream:
+		#print "FROM STREAM"
+		#data = load_data(source_package, data_range)
+		data = None
+		data_halo = 0
+	elif out_of_core:
 		data = load_data(source_package, data_range)
 		data_halo = 0
 	else:
@@ -377,6 +388,7 @@ while flag != "finish":
 		time.sleep(0.001)
 	source = comm.recv(source=MPI.ANY_SOURCE,    tag=5)
 	flag = comm.recv(source=source,              tag=5)
+
 	
 	if log_type != False: print "Reader source:", source, "flag:", flag 
 	# interactive mode functions

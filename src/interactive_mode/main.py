@@ -531,6 +531,7 @@ def shchduler_reduce(data_package, function, return_package):
 	send_data_package(return_package,dest=dest,	   tag=5)
 	
 def synchronize():
+	exit()
 	comm.send(rank,			 dest=1,	tag=5)
 	comm.send("synchronize",	 dest=1,	tag=5)
 	comm.recv(source=1,						tag=999)
@@ -555,11 +556,6 @@ def Vivaldi_Gather(data_package):
 	dp.data = temp1
 	dp.devptr = temp2
 
-	# wati until data created, we don't know where the data will come from
-	source = comm.recv(source=MPI.ANY_SOURCE,	 tag=5)
-	flag = comm.recv(source=source,				 tag=5)
-	task = comm.recv(source=source,				 tag=57)
-	halo_size = comm.recv(source=source,		 tag=57)
 	def recv():
 		data_package = comm.recv(source=source,	 tag=52)
 		dp = data_package
@@ -571,7 +567,22 @@ def Vivaldi_Gather(data_package):
 		MPI.Request.wait(request)
 		
 		return data, data_package
-	data, data_package = recv()
+	#FREYJA STREAMING
+	# wati until data created, we don't know where the data will come from
+	if not dp.stream:
+		source = comm.recv(source=MPI.ANY_SOURCE,	 tag=5)
+		flag = comm.recv(source=source,				 tag=5)
+		task = comm.recv(source=source,				 tag=57)
+		halo_size = comm.recv(source=source,		 tag=57)
+		data, data_package = recv()
+
+	else:
+		for elem in range(dp.stream_count):
+			source = comm.recv(source=MPI.ANY_SOURCE, tag=25)
+
+		data = "FINISH"
+
+
 	return data
 
 def get_file_name(file_name=''):
@@ -779,6 +790,8 @@ def register_function_package(function_package):
 	temp_data_list = clear_data() # remove real data before mpi send
 	global comm
 	dest = 1
+	import time	
+	time.sleep(2)
 	comm.send(0,					dest=dest,	  tag=5)
 	comm.send("function",			dest=dest,	  tag=5)
 	comm.send(function_package,	dest=dest,	  tag=52)
@@ -874,10 +887,15 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 		data_package.data_dtype = numpy.ndarray
 		data_package.data_halo = output_halo
 		
+		# Find return type of worker function
 		def get_return_dtype(function_name, argument_package_list):
 			from Vivaldi_translator_layer import get_return_dtype
 			function_code = function_code_dict[function_name]
 			return_dtype = get_return_dtype(function_name, argument_package_list, function_code)
+			for elem in argument_package_list:
+				if isinstance(elem, Data_package):
+					if elem.stream:
+						return elem.data_contents_dtype
 			if return_dtype.endswith('_volume'):
 				print "Vivaldi_warning"
 				print "---------------------------------"
@@ -887,6 +905,7 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 				print "---------------------------------"
 			return return_dtype
 		return_dtype = get_return_dtype(function_name, argument_package_list)
+
 
 		data_package.set_data_contents_dtype(return_dtype)
 		data_package.set_full_data_range(work_range)
@@ -908,6 +927,12 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 	# register function to scheduler
 	def get_function_package(function_name, argument_package_list, return_package, work_range, merge_func='', merge_order=''):
 		fp = Function_package()
+		stream_flag = False
+		for elem in argument_package_list:
+			if elem.stream == True:
+				stream_flag = True
+				fp.stream = True
+				fp.stream_count = elem.stream_count
 		fp.set_function_name(function_name)
 		fp.set_function_args(argument_package_list)
 		from OpenGL.GL import glGetFloatv, GL_MODELVIEW_MATRIX
@@ -924,6 +949,21 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 		fp.output = return_package
 		return fp
 	function_package = get_function_package(function_name, argument_package_list, return_package, work_range, merge_func, merge_order)
+
+	
+	# for david rendering
+	global given_mvmtx, given_inv_mvmtx
+	#if given_mvmtx is not None and given_inv_mvmtx is not None:
+	if False:
+	#if True:
+		print "it works for local mvmtx"
+		filepath = '/home/whchoi/mvmtx/hoi'
+		given_mmtx = numpy.fromstring(open(filepath+"/1.mvmtx",'r').read(), dtype=numpy.float32).reshape(4,4)
+		given_inv_mmtx = numpy.fromstring(open(filepath+"/1.invmvmtx",'r').read(), dtype=numpy.float32).reshape(4,4)
+		function_package.mmtx = given_mvmtx
+		function_package.inv_mmtx = given_inv_mvmtx
+
+
 	
 	# setting viewer-src
 	if Vivaldi_viewer.v != None:
@@ -957,6 +997,7 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 		fp.TF_bandwidth		  = v.getTFBW()
 	
 	register_function_package(function_package)
+	import time
 	
 	if merge_func != '':
 		input_package = return_package.copy()
@@ -1040,8 +1081,12 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 		# ask scheduler to merge
 		scheduler_merge(merge_function_package, n)
 
+	#FREYJA STREAMING
+	return_package.stream = function_package.stream
+	return_package.stream_count = function_package.stream_count
 	scheduler_retain(return_package)
 	return return_package
+
 def run_function(return_name=None, func_name='', execid=[], work_range=None, args=[], arg_names=[], dtype_dict={}, output_halo=0, halo_dict={}, split_dict={}, merge_func='', merge_order=''): # compatibility to old version
 	function_name = func_name
 	def get_argument_package_list(args, arg_names, split_dict, halo_dict):
@@ -1057,12 +1102,20 @@ def run_function(return_name=None, func_name='', execid=[], work_range=None, arg
 				argument_package = None
 				# get modifier split and halo
 				split = split_dict[data_name] if data_name in split_dict else {}
+				#FREYJA STREAMING
+				if isinstance(arg, Data_package):
+					if arg.stream:
+						split = {'z':len(arg.stream_file_list)}
+						split_dict[data_name] = split
+						split_dict[return_name] = split
+				
 				halo = halo_dict[data_name] if data_name in halo_dict else 0 
 				# apply to data_package
 				if isinstance(arg, Data_package):
 					argument_package = arg
 					argument_package.split = split
 					argument_package.halo = halo
+
 					
 					if argument_package.unique_id == None:
 						def get_unique_id(arg):
@@ -1140,6 +1193,17 @@ def Translate(x, y, z):
 	glTranslate(x, y, z)
 def Scaled(x, y, z):
 	glScale(x, y, z)
+
+# For local mvmtx
+given_mvmtx = None
+given_inv_mvmtx = None
+def LoadMvmtx(filepath):
+	print "LOADING"
+	global given_mvmtx, given_inv_mvmtx
+	given_mmtx = numpy.fromstring(open(filepath+"/1.mvmtx",'r').read(), dtype=numpy.float32).reshape(4,4)
+	given_inv_mmtx = numpy.fromstring(open(filepath+"/1.invmvmtx",'r').read(), dtype=numpy.float32).reshape(4,4)
+
+
 	
 # test function
 def say(execid_list=[],num=-1):
@@ -1317,7 +1381,6 @@ def Vivaldi_input_argument_parsing(argument_list):
 				return elem
 
 	filename = get_filename(argument_list)
-	print filename
 	if filename != None:
 		load_file_init(filename)
 
@@ -1371,6 +1434,6 @@ def interactive_mode():
 if 'main' not in globals():
 	interactive_mode()
 else:
-
 	synchronize()
+	
 	

@@ -539,7 +539,7 @@ def Second_level(elem_list, dtype_list, local_dict, dtype_dict):
 	while i < n:
 		flag = True
 		
-		print "HA", dtype_list[i], elem_list[i], local_dict, dtype_dict
+		#print "HA", dtype_list[i], elem_list[i], local_dict, dtype_dict
 		if (dtype_list[i] is not 'operator' 
 			and i+1 < n and elem_list[i+1][0] == '(' 
 			and elem_list[i+1][-1] == ')'): # Function call check

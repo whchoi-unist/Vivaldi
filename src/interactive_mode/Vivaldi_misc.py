@@ -185,6 +185,124 @@ def make_memory_shape(shape, cms):
 	if cms != [1]: memory_shape = tuple(list(shape) + cms)
 	return tuple(memory_shape)
 
+#FREYJA STREAMING
+def load_data(data_package, data_range, fp=None):
+
+	if log_type in ['time','all']: st = time.time()
+	dp = data_package
+	file_name = dp.file_name
+
+	data_range = dict(data_range)
+
+	p = file_name.find('.')
+	extension = file_name[p+1:].lower()
+
+	if fp != None:
+		f = fp
+	else:
+		f = open(file_name,'rb')
+
+	# creat data for memroy read
+	chan = dp.data_contents_memory_shape
+	shape = range_to_shape(data_range)
+	data_memory_shape = list(shape)
+	if chan != [1]: data_memory_shape = list(shape) + chan
+	data_contents_memory_dtype = dp.data_contents_memory_dtype
+
+	length = 1
+	for elem in data_memory_shape:
+		length *= elem
+
+	file_size = {}
+	i = 0
+	for axis in AXIS[::-1]:
+		if axis in data_range:
+			file_size[axis] = dp.full_data_range[axis][1]-dp.full_data_range[axis][0]
+		else:
+			file_size[axis] = 0
+		i += 1
+
+
+	# index of start point
+	data_start = {}
+	for axis in AXIS:
+		if axis not in data_range:	data_start[axis] = 0
+		else: data_start[axis] = data_range[axis][0]
+
+	dim = len(data_range)
+	if dim == 2:
+		W = file_size['w']
+		Z = file_size['z']
+		Y = file_size['y']
+		X = file_size['x']
+		
+		ss = ''
+		idx = data_start['y']*X
+		file_python_dtype = Vivaldi_dtype_to_python_dtype(dp.file_dtype)
+		file_bytes = get_bytes(file_python_dtype)
+
+		for y in range(data_range['y'][0], data_range['y'][1]):
+			idx = y * (X) * file_bytes
+			f.seek(idx,0)
+			ts = f.read((X) * file_bytes)
+			ss += ts
+
+		buf = numpy.fromstring(ss, dtype=file_python_dtype)
+		height = data_range['y'][1]-data_range['y'][0]
+		buf = buf.reshape((height,X))
+		buf = buf[:, data_range['x'][0]:data_range['x'][1]]
+
+		buf = buf.astype(data_contents_memory_dtype)
+	
+	elif dim == 3:
+		W = file_size['w']
+		Z = file_size['z']
+		Y = file_size['y']
+		X = file_size['x']
+		
+		ss = ''
+		idx = data_start['z']*X*Y
+		file_python_dtype = Vivaldi_dtype_to_python_dtype(dp.file_dtype)
+		file_bytes = get_bytes(file_python_dtype)*chan[0]
+
+		if not data_package.stream:
+			for z in range(data_range['z'][0], data_range['z'][1]):
+				idx = z * (X*Y) * file_bytes
+				f.seek(idx,0)
+				ts = f.read((X*Y) * file_bytes)
+				ss += ts
+
+		else:
+			ss = f.read()
+			data_halo = data_package.data_halo
+			data_range = data_range
+			full_data_range = data_package.full_data_range
+			new_z_start = data_range['z'][0] + data_halo if data_range['z'][0] != full_data_range['z'][0] else data_range['z'][0]
+			new_z_end = data_range['z'][1] - data_halo if data_range['z'][1] != full_data_range['z'][1] else data_range['z'][1]
+			data_range['z'] = (new_z_start, new_z_end)
+
+		buf = numpy.fromstring(ss, dtype=file_python_dtype)
+		depth = data_range['z'][1]-data_range['z'][0]
+
+		if chan == [1]:
+			buf = buf.reshape((depth,Y,X))
+		else:
+			buf = buf.reshape((depth,Y,X,chan[0]))
+
+		#buf = buf[:,data_range['y'][0]:data_range['y'][1], data_range['x'][0]:data_range['x'][1]]
+		buf = buf.astype(data_contents_memory_dtype)
+
+	if log_type in ['time','all']:
+		u = dp.unique_id
+		bytes = buf.nbytes
+		t = MPI.Wtime()-st
+		ms = 1000*t
+		bw = bytes/GIGA/t
+		name = dp.data_name
+
+
+	return buf
+
 def make_range_list(full_range, split, halo=0):
 	# make data range list
 	range_list = []

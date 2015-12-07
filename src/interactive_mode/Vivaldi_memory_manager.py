@@ -50,6 +50,9 @@ VIVALDI_DYNAMIC = True
 
 log_type = False
 
+# FREYJA STREAMING
+delayed_function_list = []
+
 
 # input split
 ou_id = 0
@@ -166,6 +169,7 @@ def temp_func1(for_save=False, source_list=None):
 #							print "Copy", source, dest, "DDDDDDDD", idle_list, source_list, time.time(), u, ss, sp
 
 							memcpy_p2p(source, dest, task)
+							#print source.info()
 							cur_dict[u][ss][sp].remove(task)
 							if cur_dict[u][ss][sp] == []: del cur_dict[u][ss][sp]
 							if cur_dict[u][ss] == {}: del cur_dict[u][ss]
@@ -488,6 +492,11 @@ def register_function(function_package):
 	for arg in args:
 		
 		flag = register_arg(arg, fp.execid_list)
+		# FREYJA STREAMING
+		#if type(flag)==tuple:
+			#delayed_function_list.append(function_package)
+			#return False
+
 		if VIVALDI_DYNAMIC: 
 			if arg.get_unique_id() != '-1':
 				inform(arg)
@@ -497,6 +506,8 @@ def register_function(function_package):
 
 	if not VIVALDI_DYNAMIC:
 		reserve_function(fp)
+
+	return True
 def run_function(dest, function_package):
 	comm.send(rank,                dest=dest,    tag=5)
 	comm.send("run_function",      dest=dest,    tag=5)
@@ -526,6 +537,7 @@ def inform(data_package, dest=None, count=None):
 	if sp not in rc[u][ss]: rc[u][ss][sp] = {}
 	if data_halo not in rc[u][ss][sp]: rc[u][ss][sp][data_halo] = {}
 	if dest not in rc[u][ss][sp][data_halo]:rc[u][ss][sp][data_halo][dest] = 1
+
 	
 	data_packages[u][ss][sp] = dp
 
@@ -554,7 +566,11 @@ def register_arg(arg, execid_list = []):
 		# data_list for make memcpy tasks
 		#data_list.append([arg, execid_list])
 		# increase retain count of data sources
-		source_list, SP_list, full_copy_range, count = increase_sources_retain_count(arg)
+
+		# FREYJA STREAMING
+		source_list, SP_list, full_copy_range, count, retry_flag = increase_sources_retain_count(arg)
+		#if retry_flag :
+			#return False, False
 		source_list_dict[str((u,ss,sp,data_halo))] = source_list
 		
 		if VIVALDI_DYNAMIC:
@@ -580,7 +596,7 @@ def register_arg(arg, execid_list = []):
 	data_halo = arg.data_halo
 
 	# increase retain count of data sources
-	source_list, SP_list, full_copy_range, count = increase_sources_retain_count(arg)
+	source_list, SP_list, full_copy_range, count, _ = increase_sources_retain_count(arg)
 	source_list_dict[str((u,ss,sp,data_halo))] = source_list
 	
 	if VIVALDI_DYNAMIC:
@@ -772,6 +788,9 @@ def release(data_package):
 	
 	if ss == 'None': ss = str(SPLIT_BASE)
 	if sp == 'None': sp = str(SPLIT_BASE)
+	if dp.stream_modified == True:
+		#print function_package.function_args[0].stream_file_list
+		return
 	
 	try:
 		retain_count[u][ss][sp][data_halo] -= 1
@@ -794,6 +813,16 @@ def retain(data_package):
 	if data_halo not in retain_count[u][ss][sp]: retain_count[u][ss][sp][data_halo] = 0
 
 	retain_count[u][ss][sp][data_halo] += 1	
+	new_delayed = []
+	global delayed_function_list
+	
+	for elem in delayed_function_list:
+		flag = init_function(elem)
+		if not flag:
+			new_delayed.append(elem)
+	delayed_function_list = new_delayed
+		
+
 def make_a_memcpy_task(source_package, dest_package, dest, work_range, start=None):
 	mt = Memcpy_task()
 	# source
@@ -826,6 +855,8 @@ def make_a_memcpy_task(source_package, dest_package, dest, work_range, start=Non
 		if ss not in memcpy_tasks[u]: memcpy_tasks[u][ss] = {}
 		if sp not in memcpy_tasks[u][ss]: memcpy_tasks[u][ss][sp] = []
 		memcpy_tasks[u][ss][sp].append(mt)
+
+
 def check_SP_exist(u, ss, SP_list):
 	temp = []
 	for sp in SP_list:
@@ -851,8 +882,12 @@ def increase_sources_retain_count(data_package):
 	u, ss, sp = dp.get_id()
 	data_halo = dp.data_halo
 	rc = remaining_write_count_list			
+
 	
-	if u not in rc: rc[u] = {}
+	if u not in rc: 
+		rc[u] = {}
+		#return {}, {}, {}, 3, True
+
 	
 	for SS in rc[u]:
 		SS = ast.literal_eval(SS) # data source
@@ -877,7 +912,7 @@ def increase_sources_retain_count(data_package):
 		rc[u][ss][sp][data_halo][None] = 1
 			
 	#	log("rank%d, u=%d, remaining_write_counter=%d"%(rank, u, count),'general',log_type)
-		return source_list, SP_list, full_copy_range, count
+		return source_list, SP_list, full_copy_range, count, False
 
 	assert(False)
 
@@ -1068,6 +1103,7 @@ def make_buffer(dp, execid_list, SP_list=None, full_copy_range=None, count=None)
 
 	flag = False
 	source_list = source_list_dict[key]
+	#print "SOURCE LIST", source_list
 
 	for source in source_list:
 		# check source is available now
@@ -1121,6 +1157,359 @@ def make_buffer(dp, execid_list, SP_list=None, full_copy_range=None, count=None)
 	making_data[dest].append((u,ss,sp,data_halo))
 
 	return True
+
+def init_function(function_package):
+	def create_tasks(function_package):
+		argument_package_list = function_package.get_function_args()
+		def print_task_list(task_list):
+			for task in task_list:
+				print "TASK value TEST"
+				print task.info()
+				for elem in task.get_args():
+					print elem.info()
+				print task.output.info()
+		def get_split_iter(full_range, split, halo):
+			full_range = dict(full_range)
+			split = eval(split)
+			# calculate range list
+			def get_range_list(full_range, split, halo):
+				range_list = []
+				for axis in AXIS:
+					if axis in full_range:
+						temp = []
+						w = full_range[axis][1] - full_range[axis][0]
+						n = split[axis] if axis in split else 1
+						full_start = full_range[axis][0]
+						for m in range(n): 
+							start = m*w/n+full_start-halo
+							if start < full_range[axis][0]: start = full_range[axis][0]
+							end = (m+1)*w/n+full_start+halo
+							if end > full_range[axis][1]: end = full_range[axis][1]
+							
+							temp.append( {axis:(start, end)} )
+						
+						if len(range_list) == 0:
+							for elem in temp: range_list.append(elem)
+						else:
+							temp2 = []
+							for elem2 in temp:
+								for elem1 in range_list:
+									t = {}
+									t.update(elem1)
+									t.update(elem2)
+									temp2.append(t)
+							range_list = temp2
+				return range_list
+			range_list = get_range_list(full_range, split, halo)
+			def get_split_position(split_shape, n):
+				if n == 0:
+					print "I assumed n start from 1. if you want to set n as zero, please double check"
+				p = 0
+				split_position = dict(SPLIT_BASE)
+				ss = split_shape
+				sp = split_position
+				sp[AXIS[0]] = n
+				for axis in AXIS[0:-1]:
+					q = sp[AXIS[p]]
+					w = ss[AXIS[p]]
+					a = int(q/w)
+
+					if a*w == q: a -= 1
+					sp[AXIS[p]] -= a*w
+					sp[AXIS[p+1]] += a
+					p += 1
+				return split_position			
+			# make split list
+			split_iter = []
+			i = 0
+			n = len(range_list)
+			for i in range(n):
+				split_position = get_split_position(split, i+1)
+				split_iter.append( (range_list[i], split_position))
+			return split_iter	
+		def in_and_out_check(argument_package_list):
+			# check split is identical shape
+			output_split_shape = function_package.output.get_split_shape()	
+			def check_identical_shape(argument_package_list, split_shape):
+				for argument_package in argument_package_list:
+					if argument_package.get_unique_id() == '-1': continue
+					if argument_package.get_split_shape() != split_shape: return False
+				return True
+			flag = check_identical_shape(argument_package_list, output_split_shape)
+			if flag: return 'identical'
+
+			# get in and out split count
+			def get_split_cnt(split_shape):
+				ss = eval(split_shape)
+				cnt = 1
+				for axis in ss:
+					cnt *= ss[axis]
+				return cnt
+			out_split_cnt = get_split_cnt(function_package.output.get_split_shape())
+			def get_input_split_cnt(argument_package_list):
+				r_cnt = 1
+				for argument_package in argument_package_list:
+					if argument_package.get_unique_id() == '-1': continue
+					r_cnt *= get_split_cnt(argument_package.get_split_shape())
+				return r_cnt
+			in_split_cnt = get_input_split_cnt(argument_package_list)
+			
+			if in_split_cnt != out_split_cnt: # check split number is same
+				return False
+				
+			return 'different'
+
+
+		def in_and_out1(task_list, argument_package_list):
+			new_task_list = []
+			for task in task_list:
+				work_range = task.output.full_data_range
+				halo = task.output.data_halo
+				split_shape = task.output.get_split_shape()
+				iter = get_split_iter(work_range, split_shape, halo)
+				for split_elem in iter:
+					def get_new_task(task, split_elem):
+						work_range = split_elem[0]
+						split_position = split_elem[1]
+						
+						new_task = copy.deepcopy(task)
+						# task setting
+						new_task.work_range = dict(work_range)
+						
+						# task output setting
+						new_task.output.set_data_range(work_range)
+						new_task.output.data_halo = halo
+						new_task.output.split_position = split_position
+						
+						def input_argument_setting(argument_package_list, split_shape, split_position):
+							for argument_package in argument_package_list:
+								if argument_package.get_unique_id() == '-1': continue # constant
+								if argument_package.get_split_shape() == str(SPLIT_BASE): continue # not split data
+								argument_package.split_shape = split_shape
+								argument_package.split_position = split_position
+								argument_package.split_data_range(split_position)
+							
+						input_argument_setting(new_task.get_args(), split_shape, split_position)
+						return new_task
+						
+					new_task = get_new_task(task, split_elem)
+					new_task_list.append(new_task)
+			return new_task_list
+		def in_and_out2(task_list, argument_package_list):
+			task = task_list[0]
+			new_task_list = []
+			n = len(argument_package_list)
+			
+			# prepare output split iter
+			work_range = task.output.full_data_range
+			halo = task.output.data_halo
+			split_shape = task.output.get_split_shape()
+			output_iter = get_split_iter(work_range, split_shape, halo)
+			
+			def recursive_task_argument_setting(argument_package_list, p):
+				if p == n:
+					def get_new_task(task, split_elem):
+						work_range = split_elem[0]
+						split_position = split_elem[1]
+						
+						new_task = task.copy()
+						
+						# copy argumnet
+						new_task.set_args(copy.deepcopy(argument_package_list))
+						
+						# task setting
+						new_task.work_range = dict(work_range)
+						
+						# task output setting
+						new_task.output.set_data_range(work_range)
+					#	new_task.output.data_halo = halo
+						new_task.output.split_position = split_position
+						
+						return new_task
+					cnt = len(new_task_list)
+					split_elem = output_iter[cnt]
+					new_task = get_new_task(task, split_elem)
+					new_task_list.append(new_task)
+					return 
+				argument_package = argument_package_list[p]
+				if argument_package.get_split_shape() != str(SPLIT_BASE):
+					work_range = argument_package.full_data_range
+					halo = argument_package.data_halo
+					split = argument_package.get_split_shape()						
+					iter = get_split_iter(work_range, split, halo)
+					for split_elem in iter:
+						work_range = split_elem[0]
+						split_position = split_elem[1]
+						
+						argument_package.set_data_range(work_range)
+						argument_package.data_halo = halo
+						argument_package.split_position = split_position
+						
+						argument_package_list[p] = argument_package
+						recursive_task_argument_setting(argument_package_list, p+1)
+				else:
+					recursive_task_argument_setting(argument_package_list, p+1)
+			recursive_task_argument_setting(copy.deepcopy(argument_package_list), 0)
+			
+			return new_task_list
+		def input_split(task_list, argument_package_list):
+			fp = task_list[0]
+			new_task_list = []
+			n = len(argument_package_list)
+			def recursive_task_argument_setting(argument_package_list, p):
+				if p == n:
+					# copy task
+					new_task = copy.deepcopy(fp)
+					
+					# set task argument
+					new_task.set_args(copy.deepcopy(argument_package_list))
+					
+					# append to task list
+					new_task_list.append(new_task)
+					
+					return False
+				argument_package = argument_package_list[p]
+				if argument_package.get_split_shape() != str(SPLIT_BASE):
+					work_range = argument_package.full_data_range
+					halo = argument_package.data_halo
+					split = argument_package.get_split_shape()						
+					iter = get_split_iter(work_range, split, halo)
+					for split_elem in iter:
+						work_range = split_elem[0]
+						split_position = split_elem[1]
+						
+						argument_package.set_data_range(work_range)
+						argument_package.data_halo = halo
+						argument_package.split_position = split_position
+						
+						fp.output.depth = make_depth(work_range, fp.mmtx)
+						argument_package_list[p] = argument_package
+						recursive_task_argument_setting(argument_package_list, p+1)
+						# set input split flag
+					return True
+				else:
+					return recursive_task_argument_setting(argument_package_list, p+1)
+			sw = recursive_task_argument_setting(copy.deepcopy(argument_package_list), 0)
+			# change id
+			if sw: # mean input split occur
+				ou_id = 0
+				for new_task in new_task_list:
+					new_id = new_task.output.get_unique_id() + '_input_split_' + str(ou_id)
+					new_task.output.unique_id = new_id
+					
+					key = str(new_task.output.get_id())
+					depth_dict[key] = new_task.output.depth
+					
+					ou_id += 1
+					
+			return new_task_list
+		def output_split(task_list, argument_package_list):
+			# output split change
+			# 1. work range of task
+			# 2. function output change with task range change
+				
+			new_task_list = []
+			for task in task_list:
+				work_range = task.output.full_data_range
+				halo = task.output.data_halo
+				split_shape = task.output.get_split_shape()
+				iter = get_split_iter(work_range, split_shape, halo)
+				for split_elem in iter:
+					def get_new_task(task, split_elem):
+						work_range = split_elem[0]
+						split_position = split_elem[1]
+						
+						new_task = task.copy()
+						# task setting
+						new_task.work_range = dict(work_range)
+						
+						# task output setting
+						new_task.output.set_data_range(work_range)
+						new_task.output.data_halo = halo
+						new_task.output.split_position = split_position
+						
+						return new_task
+						
+					new_task = get_new_task(task, split_elem)
+					new_task_list.append(new_task)
+			
+			return new_task_list
+		def prepare_modifier(function_package):
+			def prepare_output(to):
+				# split modifier
+				split_shape = {} if to.split == None else to.split
+				for axis in AXIS:
+					if axis not in split_shape:
+						split_shape[axis] = 1
+				to.split_shape = dict(split_shape)
+				to.split = None
+				
+				# halo modifier
+				to.data_halo = to.halo
+				to.halo = None
+				return to
+			def prepare_args(args_list):
+				new_args = []
+				for arg in args_list:
+					if arg.get_unique_id() == '-1':
+						new_args.append(arg)
+						arg.split = None
+						arg.halo = None
+						continue
+					# split modifier
+					split_shape = {} if arg.split == None else arg.split
+					for axis in AXIS:
+						if axis not in split_shape:
+							split_shape[axis] = 1
+					arg.split_shape = dict(split_shape)
+					arg.split = None
+					
+					# halo modifier
+					arg.data_halo = arg.halo
+					arg.halo = None
+					
+					new_args.append(arg)
+				return new_args
+				
+			function_package.output = prepare_output(function_package.output)
+			function_package.set_args(prepare_args(function_package.get_args()))
+				
+		prepare_modifier(function_package)
+		
+		task_list = [function_package]
+		#print_task_list(task_list)
+		
+		flag = in_and_out_check(argument_package_list)
+		#print "in-and-out split model", flag
+		if flag == 'identical':
+			task_list = in_and_out1(task_list, argument_package_list)
+		#	print_task_list(task_list)
+			return task_list
+		elif flag == 'different':
+			task_list = in_and_out2(task_list, argument_package_list)
+			return task_list
+		else:			
+			task_list = input_split(task_list, argument_package_list)
+			task_list = output_split(task_list, argument_package_list)
+			#print_task_list(task_list)
+		
+		return task_list
+	task_list = create_tasks(function_package)
+	# check task list
+	if len(task_list) == 0:
+		print "Vivaldi Warning"
+		print "--------------------------------------"
+		print "No task is created"
+		print "--------------------------------------"
+	# register task
+	def register_tasks(task_list):
+		for task in task_list:
+			flag = register_function(task)
+			if type(flag)==tuple : return False
+	register_tasks(task_list)
+	#launch_task()
+	return True
+
 def collect_data(arg_list=None, dest=None):
 
 	for dp in arg_list:
@@ -1252,353 +1641,10 @@ while flag != "finish":
 	# function initialization	
 	if flag == "function":
 		function_package = comm.recv(source=source, tag=52)
+		flag = init_function(function_package)
+		if not flag:
+			delayed_function_list.append(function_package)
 		
-		def create_tasks(function_package):
-			argument_package_list = function_package.get_function_args()
-			def print_task_list(task_list):
-				for task in task_list:
-					print "TASK value TEST"
-					print task.info()
-					for elem in task.get_args():
-						print elem.info()
-					print task.output.info()
-			def get_split_iter(full_range, split, halo):
-				full_range = dict(full_range)
-				split = eval(split)
-				# calculate range list
-				def get_range_list(full_range, split, halo):
-					range_list = []
-					for axis in AXIS:
-						if axis in full_range:
-							temp = []
-							w = full_range[axis][1] - full_range[axis][0]
-							n = split[axis] if axis in split else 1
-							full_start = full_range[axis][0]
-							for m in range(n): 
-								start = m*w/n+full_start-halo
-								if start < full_range[axis][0]: start = full_range[axis][0]
-								end = (m+1)*w/n+full_start+halo
-								if end > full_range[axis][1]: end = full_range[axis][1]
-								
-								temp.append( {axis:(start, end)} )
-							
-							if len(range_list) == 0:
-								for elem in temp: range_list.append(elem)
-							else:
-								temp2 = []
-								for elem2 in temp:
-									for elem1 in range_list:
-										t = {}
-										t.update(elem1)
-										t.update(elem2)
-										temp2.append(t)
-								range_list = temp2
-					return range_list
-				range_list = get_range_list(full_range, split, halo)
-				def get_split_position(split_shape, n):
-					if n == 0:
-						print "I assumed n start from 1. if you want to set n as zero, please double check"
-					p = 0
-					split_position = dict(SPLIT_BASE)
-					ss = split_shape
-					sp = split_position
-					sp[AXIS[0]] = n
-					for axis in AXIS[0:-1]:
-						q = sp[AXIS[p]]
-						w = ss[AXIS[p]]
-						a = int(q/w)
-
-						if a*w == q: a -= 1
-						sp[AXIS[p]] -= a*w
-						sp[AXIS[p+1]] += a
-						p += 1
-					return split_position			
-				# make split list
-				split_iter = []
-				i = 0
-				n = len(range_list)
-				for i in range(n):
-					split_position = get_split_position(split, i+1)
-					split_iter.append( (range_list[i], split_position))
-				return split_iter	
-			def in_and_out_check(argument_package_list):
-				# check split is identical shape
-				output_split_shape = function_package.output.get_split_shape()	
-				def check_identical_shape(argument_package_list, split_shape):
-					for argument_package in argument_package_list:
-						if argument_package.get_unique_id() == '-1': continue
-						if argument_package.get_split_shape() != split_shape: return False
-					return True
-				flag = check_identical_shape(argument_package_list, output_split_shape)
-				if flag: return 'identical'
-
-				# get in and out split count
-				def get_split_cnt(split_shape):
-					ss = eval(split_shape)
-					cnt = 1
-					for axis in ss:
-						cnt *= ss[axis]
-					return cnt
-				out_split_cnt = get_split_cnt(function_package.output.get_split_shape())
-				def get_input_split_cnt(argument_package_list):
-					r_cnt = 1
-					for argument_package in argument_package_list:
-						if argument_package.get_unique_id() == '-1': continue
-						r_cnt *= get_split_cnt(argument_package.get_split_shape())
-					return r_cnt
-				in_split_cnt = get_input_split_cnt(argument_package_list)
-				
-				if in_split_cnt != out_split_cnt: # check split number is same
-					return False
-					
-				return 'different'
-			def in_and_out1(task_list, argument_package_list):
-				new_task_list = []
-				for task in task_list:
-					work_range = task.output.full_data_range
-					halo = task.output.data_halo
-					split_shape = task.output.get_split_shape()
-					iter = get_split_iter(work_range, split_shape, halo)
-					for split_elem in iter:
-						def get_new_task(task, split_elem):
-							work_range = split_elem[0]
-							split_position = split_elem[1]
-							
-							new_task = copy.deepcopy(task)
-							# task setting
-							new_task.work_range = dict(work_range)
-							
-							# task output setting
-							new_task.output.set_data_range(work_range)
-							new_task.output.data_halo = halo
-							new_task.output.split_position = split_position
-							
-							def input_argument_setting(argument_package_list, split_shape, split_position):
-								for argument_package in argument_package_list:
-									if argument_package.get_unique_id() == '-1': continue # constant
-									if argument_package.get_split_shape() == str(SPLIT_BASE): continue # not split data
-									argument_package.split_shape = split_shape
-									argument_package.split_position = split_position
-									argument_package.split_data_range(split_position)
-								
-							input_argument_setting(new_task.get_args(), split_shape, split_position)
-							return new_task
-							
-						new_task = get_new_task(task, split_elem)
-						new_task_list.append(new_task)
-				return new_task_list
-			def in_and_out2(task_list, argument_package_list):
-				task = task_list[0]
-				new_task_list = []
-				n = len(argument_package_list)
-				
-				# prepare output split iter
-				work_range = task.output.full_data_range
-				halo = task.output.data_halo
-				split_shape = task.output.get_split_shape()
-				output_iter = get_split_iter(work_range, split_shape, halo)
-				
-				def recursive_task_argument_setting(argument_package_list, p):
-					if p == n:
-						def get_new_task(task, split_elem):
-							work_range = split_elem[0]
-							split_position = split_elem[1]
-							
-							new_task = task.copy()
-							
-							# copy argumnet
-							new_task.set_args(copy.deepcopy(argument_package_list))
-							
-							# task setting
-							new_task.work_range = dict(work_range)
-							
-							# task output setting
-							new_task.output.set_data_range(work_range)
-						#	new_task.output.data_halo = halo
-							new_task.output.split_position = split_position
-							
-							return new_task
-						cnt = len(new_task_list)
-						split_elem = output_iter[cnt]
-						new_task = get_new_task(task, split_elem)
-						new_task_list.append(new_task)
-						return 
-					argument_package = argument_package_list[p]
-					if argument_package.get_split_shape() != str(SPLIT_BASE):
-						work_range = argument_package.full_data_range
-						halo = argument_package.data_halo
-						split = argument_package.get_split_shape()						
-						iter = get_split_iter(work_range, split, halo)
-						for split_elem in iter:
-							work_range = split_elem[0]
-							split_position = split_elem[1]
-							
-							argument_package.set_data_range(work_range)
-							argument_package.data_halo = halo
-							argument_package.split_position = split_position
-							
-							argument_package_list[p] = argument_package
-							recursive_task_argument_setting(argument_package_list, p+1)
-					else:
-						recursive_task_argument_setting(argument_package_list, p+1)
-				recursive_task_argument_setting(copy.deepcopy(argument_package_list), 0)
-				
-				return new_task_list
-			def input_split(task_list, argument_package_list):
-				fp = task_list[0]
-				new_task_list = []
-				n = len(argument_package_list)
-				def recursive_task_argument_setting(argument_package_list, p):
-					if p == n:
-						# copy task
-						new_task = copy.deepcopy(fp)
-						
-						# set task argument
-						new_task.set_args(copy.deepcopy(argument_package_list))
-						
-						# append to task list
-						new_task_list.append(new_task)
-						
-						return False
-					argument_package = argument_package_list[p]
-					if argument_package.get_split_shape() != str(SPLIT_BASE):
-						work_range = argument_package.full_data_range
-						halo = argument_package.data_halo
-						split = argument_package.get_split_shape()						
-						iter = get_split_iter(work_range, split, halo)
-						for split_elem in iter:
-							work_range = split_elem[0]
-							split_position = split_elem[1]
-							
-							argument_package.set_data_range(work_range)
-							argument_package.data_halo = halo
-							argument_package.split_position = split_position
-							
-							fp.output.depth = make_depth(work_range, fp.mmtx)
-							argument_package_list[p] = argument_package
-							recursive_task_argument_setting(argument_package_list, p+1)
-							# set input split flag
-						return True
-					else:
-						return recursive_task_argument_setting(argument_package_list, p+1)
-				sw = recursive_task_argument_setting(copy.deepcopy(argument_package_list), 0)
-				# change id
-				if sw: # mean input split occur
-					ou_id = 0
-					for new_task in new_task_list:
-						new_id = new_task.output.get_unique_id() + '_input_split_' + str(ou_id)
-						new_task.output.unique_id = new_id
-						
-						key = str(new_task.output.get_id())
-						depth_dict[key] = new_task.output.depth
-						
-						ou_id += 1
-						
-				return new_task_list
-			def output_split(task_list, argument_package_list):
-				# output split change
-				# 1. work range of task
-				# 2. function output change with task range change
-					
-				new_task_list = []
-				for task in task_list:
-					work_range = task.output.full_data_range
-					halo = task.output.data_halo
-					split_shape = task.output.get_split_shape()
-					iter = get_split_iter(work_range, split_shape, halo)
-					for split_elem in iter:
-						def get_new_task(task, split_elem):
-							work_range = split_elem[0]
-							split_position = split_elem[1]
-							
-							new_task = task.copy()
-							# task setting
-							new_task.work_range = dict(work_range)
-							
-							# task output setting
-							new_task.output.set_data_range(work_range)
-							new_task.output.data_halo = halo
-							new_task.output.split_position = split_position
-							
-							return new_task
-							
-						new_task = get_new_task(task, split_elem)
-						new_task_list.append(new_task)
-				
-				return new_task_list
-			def prepare_modifier(function_package):
-				def prepare_output(to):
-					# split modifier
-					split_shape = {} if to.split == None else to.split
-					for axis in AXIS:
-						if axis not in split_shape:
-							split_shape[axis] = 1
-					to.split_shape = dict(split_shape)
-					to.split = None
-					
-					# halo modifier
-					to.data_halo = to.halo
-					to.halo = None
-					return to
-				def prepare_args(args_list):
-					new_args = []
-					for arg in args_list:
-						if arg.get_unique_id() == '-1':
-							new_args.append(arg)
-							arg.split = None
-							arg.halo = None
-							continue
-						# split modifier
-						split_shape = {} if arg.split == None else arg.split
-						for axis in AXIS:
-							if axis not in split_shape:
-								split_shape[axis] = 1
-						arg.split_shape = dict(split_shape)
-						arg.split = None
-						
-						# halo modifier
-						arg.data_halo = arg.halo
-						arg.halo = None
-						
-						new_args.append(arg)
-					return new_args
-					
-				function_package.output = prepare_output(function_package.output)
-				function_package.set_args(prepare_args(function_package.get_args()))
-				
-			prepare_modifier(function_package)
-			
-			task_list = [function_package]
-			#print_task_list(task_list)
-			
-			flag = in_and_out_check(argument_package_list)
-			#print "in-and-out split model", flag
-			if flag == 'identical':
-				task_list = in_and_out1(task_list, argument_package_list)
-			#	print_task_list(task_list)
-				return task_list
-			elif flag == 'different':
-				task_list = in_and_out2(task_list, argument_package_list)
-				return task_list
-			else:			
-				task_list = input_split(task_list, argument_package_list)
-				task_list = output_split(task_list, argument_package_list)
-				#print_task_list(task_list)
-			
-			return task_list
-		task_list = create_tasks(function_package)
-		# check task list
-		if len(task_list) == 0:
-			print "Vivaldi Warning"
-			print "--------------------------------------"
-			print "No task is created"
-			print "--------------------------------------"
-		# register task
-		def register_tasks(task_list):
-			for task in task_list:
-				register_function(task)
-		register_tasks(task_list)
-		launch_task()
 	elif flag == "set_function":
 		Vivaldi_code = comm.recv(source=source, tag=5)
 		for dest in computing_unit_list:

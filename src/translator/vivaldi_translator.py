@@ -217,13 +217,12 @@ def parse_function(function_code, function_name, argument_package_list):
 	
 	return return_dtype
 	
-def translate_to_CUDA(Vivaldi_code='', function_name='', function_arguments=''):
+def translate_to_CUDA(Vivaldi_code='', function_name='', function_arguments='',dtype_dict={}):
 	from vi2cu_translator.main import vi2cu_translator
 	import numpy
 	func_code = find_code(function_name=function_name, code=Vivaldi_code)
 	
 	function_argument_list = get_argument(func_code)
-	dtype_dict = {}
 	
 	i = 0
 	for dp in function_arguments:

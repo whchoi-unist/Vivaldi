@@ -1133,7 +1133,7 @@ def add_volume_ranges(CUDA_head, local_dict):
 	output = ''
 	output += elem_list[0] + ' ' # def
 	output += elem_list[1] # function_name
-	
+
 	if 'rb' in local_dict:
 		if not local_dict['rb'].endswith('_volume'):
 			local_dict['rb'] = local_dict['rb'] + '_volume'

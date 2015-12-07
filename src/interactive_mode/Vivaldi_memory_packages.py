@@ -13,7 +13,10 @@ class Function_package():
 		self.reserved = False
 		self.output = Data_package()
 		self.mmtx = numpy.eye(4,dtype=numpy.float32)
-		#self.inv_mmtx = numpy.eye(4,dtype=numpy.float32)
+		#FREYJA STREAMING
+		#self.stream = True
+		self.stream = False
+		self.stream_count = 0
 		
 		self.transN = 0
 		self.trans_tex = None
@@ -82,6 +85,13 @@ class Data_package():
 			self.retain_counter = 1
 			self.usage = None
 			self.shared = False
+			#FREYJA STREAMING
+			self.stream = False
+			self.stream_modified = False
+			self.disk_file_size = 64
+			self.disk_block_size = 16
+			self.stream_file_list = []
+			self.stream_count = 0
 			
 			# data
 			self.data_range = None
@@ -213,6 +223,39 @@ class Data_package():
 				new_range[axis] = (start, end)
 		
 		self.set_data_range(new_range)
+	#FREYJA STREAMING
+	def split_data_range_streaming(self, streaming_cnt):
+		new_range = {}
+		if self.stream_modified :
+			return 
+		split_shape = eval(str(self.split_shape))
+		split_position = eval(str(self.split_position))
+		split_position['z'] = (split_position['z']-1)*self.disk_file_size / self.disk_block_size + streaming_cnt +1
+		self.split_position = split_position
+		
+		split_shape['z'] = (split_shape['z']) * self.disk_file_size / self.disk_block_size 
+
+		
+		for axis in AXIS:
+			if axis in self.full_data_range:
+				w = self.full_data_range[axis][1] - self.full_data_range[axis][0]
+				n = split_shape[axis] if axis in split_shape else 1
+				full_start = self.full_data_range[axis][0]
+				m = split_position[axis]-1
+				
+				start = m*w/n+full_start-self.data_halo
+				if start < self.full_data_range[axis][0]: start = self.full_data_range[axis][0]
+				end = (m+1)*w/n+full_start+self.data_halo
+				if end > self.full_data_range[axis][1]: end = self.full_data_range[axis][1]
+				
+				new_range[axis] = (start, end)
+
+		self.split_shape = str(split_shape)
+
+		self.set_data_range(new_range)
+		self.stream_modified = True
+
+
 	def set_usage(self, usage):
 		if usage == 0:
 			print "VIVALDI system error"

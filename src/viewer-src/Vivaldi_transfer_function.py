@@ -163,7 +163,8 @@ class TFN_widget(QGLWidget):
 		for elem in range(256):
 			#self.transfer_function[4*elem + 3] = numpy.uint8(self.transfer_alpha[elem] * float(self.transfer_alpha[elem] / 255.0) )
 			#self.transfer_function[4*elem + 3] = numpy.uint8(self.transfer_alpha[elem] * float(self.transfer_alpha[elem] / 255.0) * float(self.transfer_alpha[elem] /255.0 ))
-			self.transfer_function[4*elem + 3] = numpy.uint8(self.transfer_alpha[elem])
+			self.transfer_function[4*elem + 3] = numpy.uint8(self.transfer_alpha[elem] * float(self.transfer_alpha[elem] / 255.0) * float(self.transfer_alpha[elem] /255.0 )*float(self.transfer_alpha[elem]/255.0))
+			#self.transfer_function[4*elem + 3] = numpy.uint8(self.transfer_alpha[elem])
 		return self.transfer_function
 
 	def setLoadedTFF(self):

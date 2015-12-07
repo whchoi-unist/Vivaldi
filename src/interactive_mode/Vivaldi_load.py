@@ -84,7 +84,7 @@ def load_data_3d(file_full_name, dtype=None, out_of_core=False):
 	file_name, extension = split_file_name_and_extension(file_full_name)
 	el = extension.lower()
 
-	if out_of_core:
+	if out_of_core or el == 'stream':
 		if el == 'dat':
 			# read dat file
 			# dat file have FileName and 
@@ -122,6 +122,91 @@ def load_data_3d(file_full_name, dtype=None, out_of_core=False):
 			temp.set_data_contents_dtype(dtype)
 	
 			data_range = shape_to_range(shape)
+
+			temp.set_data_range(data_range)
+			temp.set_buffer_range(data_range)
+			temp.set_full_data_range(data_range)
+			return temp
+		# FREYJA STREAMING
+		elif el == 'stream':
+			file_info = matrixio.read_stream(file_full_name)
+			shape = file_info['Resolution'].split()
+			shape[0],shape[1],shape[2] = int(shape[2]),int(shape[1]),int(shape[0])
+			contents_dtype = file_info['Format'].lower()
+			chan = file_info['Channel'] if 'Channel' in file_info else 1
+			
+			if 'Path' in file_info:
+				# user defined path
+				path = file_info['Path']
+			else:
+				# default is find same folder
+				idx = file_full_name.rfind('/')
+				path = file_full_name[:idx+1] 
+				
+
+
+			temp = Data_package()
+			temp.out_of_core = True
+			temp.stream = True
+			temp.disk_file_size = int(file_info['Filesize']) if 'Filesize' in file_info else temp.disk_file_size
+			temp.disk_block_size = int(file_info['Blocksize']) if 'Blocksize' in file_info else temp.disk_block_size
+
+
+			temp.data_dtype = numpy.ndarray
+			temp.file_name = path
+			import re
+			temp.stream_file_list = re.sub(' +',' ',file_info['Filenames']).split(' ')
+			temp.stream_count = len(temp.stream_file_list)
+
+			temp.file_dtype = python_dtype_to_Vivaldi_dtype(contents_dtype)
+
+			temp.buffer_dtype = numpy.ndarray
+			if dtype != None: dtype = dtype
+			else: dtype = contents_dtype
+			if chan != 1: dtype += str(chan)
+
+			temp.set_data_contents_dtype(dtype)
+	
+			data_range = shape_to_range(shape)
+
+			temp.set_data_range(data_range)
+			temp.set_buffer_range(data_range)
+			temp.set_full_data_range(data_range)
+			return temp
+
+		# OLD stream format
+		elif el == 'streamaaaa':
+			file_info = matrixio.read_stream(file_full_name)
+			prefix = file_info['FilePrefix']
+			assert(prefix != None)
+
+			if 'Start' in file_info:
+				start_cnt = int(file_info['Start'])
+
+			# get resolution
+			counter_size = prefix.count('@')
+			filename = file_full_name[:file_full_name.rfind('/')+1]
+			filename += prefix[:prefix.find('@')]+'%0'+str(counter_size)+'d'+prefix[prefix.rfind('.'):]
+			sample_image = matrixio.read_2d_data(filename%(start_cnt))
+
+
+			shape = sample_image.shape
+			shape = (int(file_info['Count']),shape[1], shape[0])
+
+			temp = Data_package()
+			temp.out_of_core = True
+			temp.stream = True
+			temp.data_dtype = numpy.ndarray
+			temp.file_name = filename
+			temp.file_dtype = python_dtype_to_Vivaldi_dtype(sample_image.dtype)
+
+			temp.buffer_dtype = numpy.ndarray
+			if dtype != None: dtype = dtype
+			else: dtype = temp.file_dtype
+			temp.set_data_contents_dtype(dtype)
+	
+			data_range = shape_to_range(shape)
+
 
 			temp.set_data_range(data_range)
 			temp.set_buffer_range(data_range)
