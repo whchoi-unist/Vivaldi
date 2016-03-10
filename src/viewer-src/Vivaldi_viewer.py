@@ -272,7 +272,7 @@ class Vivaldi_window(QtGui.QMainWindow):
 		#self.update_widget()
 
 	def load_tf_mv(self):	
-		info_loc = "/home/whchoi/mvmtx/hoi/second"
+		info_loc = "/home/whchoi/mvmtx/hoi/"
 		self.loadmmtx(info_loc+"/1.mvmtx")
 		self.loadinvmmtx(info_loc+"/1.invmvmtx")
 		self.loadtff(self.TFF_list.widget(0),info_loc+"/1.tf")
@@ -281,7 +281,7 @@ class Vivaldi_window(QtGui.QMainWindow):
 		#self.loadalpha(self.TFF_list.widget(1),info_loc+"/1.alpha2")
 
 	def save_tf_mv(self):
-		info_loc = "/home/whchoi/mvmtx/hoi/second/1"
+		info_loc = "/home/whchoi/mvmtx/hoi/1"
 		print info_loc
 		f = open(info_loc+".mvmtx", "w")
 
@@ -296,7 +296,7 @@ class Vivaldi_window(QtGui.QMainWindow):
 		f.close()
 
 		f = open(info_loc+".alpha", "w")
-		f.write(self.TFF_list.widget(0).transfer_alpha)
+		f.write(self.TFF_list.widget(0).transfer_alpha.tostring())
 		f.close()
 	
 		if transN == 2:

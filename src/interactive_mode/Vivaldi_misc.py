@@ -273,7 +273,12 @@ def load_data(data_package, data_range, fp=None):
 				ss += ts
 
 		else:
+			print "THIS IS ACTUAL READING PART"
+			import time
+			prev = time.time()
 			ss = f.read()
+			diff = time.time()-prev
+			print "DATA LOADING ENDS -- time elapsed = %.03f (sec) , reading speed = %.03f MB/sec"%(diff, len(ss) / diff * 10 ** -6)
 			data_halo = data_package.data_halo
 			data_range = data_range
 			full_data_range = data_package.full_data_range
@@ -281,7 +286,11 @@ def load_data(data_package, data_range, fp=None):
 			new_z_end = data_range['z'][1] - data_halo if data_range['z'][1] != full_data_range['z'][1] else data_range['z'][1]
 			data_range['z'] = (new_z_start, new_z_end)
 
+		#import time
+		#prev = time.time()
 		buf = numpy.fromstring(ss, dtype=file_python_dtype)
+		#diff = time.time()-prev
+		#print "From string to numpy array, speed = %.03f MB/sec"%(len(ss) /diff * 1024 ** -2)
 		depth = data_range['z'][1]-data_range['z'][0]
 
 		if chan == [1]:
@@ -290,7 +299,8 @@ def load_data(data_package, data_range, fp=None):
 			buf = buf.reshape((depth,Y,X,chan[0]))
 
 		#buf = buf[:,data_range['y'][0]:data_range['y'][1], data_range['x'][0]:data_range['x'][1]]
-		buf = buf.astype(data_contents_memory_dtype)
+		if file_python_dtype != data_contents_memory_dtype:
+			buf = buf.astype(data_contents_memory_dtype)
 
 	if log_type in ['time','all']:
 		u = dp.unique_id

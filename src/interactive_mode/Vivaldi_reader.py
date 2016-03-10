@@ -61,7 +61,18 @@ def send(data, data_package, dest=None, gpu_direct=False):
 	if log_type in ['time','all']: st = time.time()
 	#FREYJA STREAMING
 	if not data_package.stream:
-		request = comm.Isend(data, dest=dest, tag=57)
+		if data_package.data_bytes > 2 * 1024 ** 3:
+			blocks = data_package.data_bytes / (2*1024**3) + 1
+			total_len = len(data)
+			transfer_unit = total_len / blocks
+
+			begin = 0
+			for elem in range(blocks):
+				blk = data[begin:begin+transfer_unit]
+				request = comm.send(blk, dest=dest, tag=57+elem)
+				begin += transfer_unit
+		else:
+			request = comm.Isend(data, dest=dest, tag=57)
 	else:
 		request = comm.Isend("STREAM", dest=dest, tag=57)
 

@@ -357,6 +357,7 @@ def temp_func2(source_list=None): # dynamic function execution
 				cur_list.remove(dest)
 				break
 	return return_flag
+
 def temp_func3():
 	ft = 0
 	return_flag = True
@@ -370,6 +371,8 @@ def temp_func3():
 		flag = make_buffer(dp, execid_list)
 		if flag:
 			data_list.remove(elem)
+
+
 def temp_func4(source_list=None): # function execution
 	if source_list == None or VIVALDI_BLOCKING: cur_list = list(idle_list)
 	else:
@@ -910,6 +913,7 @@ def increase_sources_retain_count(data_package):
 		if sp not in rc[u][ss]: rc[u][ss][sp] = {}
 		if data_halo not in rc[u][ss][sp]: rc[u][ss][sp][data_halo] = {}
 		rc[u][ss][sp][data_halo][None] = 1
+
 			
 	#	log("rank%d, u=%d, remaining_write_counter=%d"%(rank, u, count),'general',log_type)
 		return source_list, SP_list, full_copy_range, count, False
@@ -1966,6 +1970,7 @@ while flag != "finish":
 		# data_range
 		data_range = dest_package.data_range
 		make_a_memcpy_task(source_package, dest_package, source, data_range)
+
 		launch_task()
 	elif flag == "reduce":
 		data_package = comm.recv(source=source, tag=5)
