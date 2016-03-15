@@ -30,6 +30,10 @@ idle_list = []
 work_list = {}
 reserved_dict = {}
 
+# FREYJA STREAMING
+task_allocation_dict = {}
+scheduled_dict = {}
+
 # work list will divide to kernel running and data copy
 kerner_list = {}
 copy_list = {}
@@ -344,12 +348,32 @@ def temp_func2(source_list=None): # dynamic function execution
 
 				if fp.dest in reserved_dict:
 					del reserved_dict[fp.dest]
+	
+			stream_catch = False
+			if fp.stream == True:
+				fn_args = fp.function_args
+				for elem in fn_args:
+					if elem.stream == True:
+						sp = elem.get_split_position()
+						ss = elem.get_split_shape()
+						stream_position = eval(sp)['z']-1
+	
+						ratio_position = stream_position / float(eval(ss)['z'])
+
+						stream_catch = True
+						hdfs_str  = elem.stream_hdfs_file_name
+						hdfs_locations = get_hdfs_locations(hdfs_str, ratio_position, computing_unit_dict)
+						
+
 
 			il = [elem for elem in t_list if elem in idle_list]
 			if il != [] and il != [2]:
 				dp = fp.output
 
-				dest = get_round_robin(il)
+				if stream_catch is False:
+					dest = get_round_robin(il)
+				else:
+					dest = schedule(il, hdfs_blk_locations=hdfs_locations, seq=stream_position)
 				run_function(dest, fp)
 				function_list.remove(fp)
 				idle_list.remove(dest)
@@ -461,6 +485,51 @@ def launch_task(source_list=None):
 	# from hard disk
 	if 2 in idle_list:
 		temp_func1(source_list=[2]) # memory copy for already assigned memory copy tasks
+
+def schedule(execid_list=None, idle=False, hdfs_blk_locations={}, init=False, seq = -1):
+	#if execid_list == None:
+	execid_list = computing_unit_list
+
+	def host_to_dest(host):
+		for elem in computing_unit_dict:
+			target_elem = computing_unit_dict[elem]
+			if target_elem['host'] == host:
+				return elem
+
+	def dest_to_host(dest):
+		return computing_unit_dict[dest]['host']
+
+	min = 0xffffff
+	dest = None
+	if hdfs_blk_locations != {}:
+		cur_list = [host_to_dest(elem) for elem in hdfs_blk_locations if host_to_dest(elem) in execid_list]
+	else:
+		cur_list = [elem for elem in computing_unit_list if elem in execid_list]
+
+	for source in cur_list:
+		if idle and source not in idle_list:continue
+		val = task_allocation_dict[dest_to_host(source)]
+		if min > val:
+			dest = source
+			min = val
+
+	#print "DEST", dest, type(dest), cur_list
+	if dest == None:
+		# no idle process
+		return None
+
+	if init==True:
+		scheduled_dict[seq] = dest
+		task_allocation_dict[dest_to_host(dest)] += 1
+
+	else:
+		dest = scheduled_dict[seq]
+
+	computing_unit_list.remove(dest)
+	computing_unit_list.append(dest)
+	return dest
+
+
 def get_round_robin(execid_list=None, idle=False):
 	if execid_list == None:
 		execid_list = computing_unit_list
@@ -1022,7 +1091,7 @@ def make_bytes_list(u, SS, SP_list, full_copy_range):
 		copy_range_list[str(SP)] = make_bytes(cliped_range)
 
 	return copy_range_list
-def select_dest_by_byte_order(bytes_list, u, ss, SP_list, execid_list):
+def select_dest_by_byte_order(bytes_list, u, ss, SP_list, execid_list, data_pack=None):
 	bytes_with_rank = {}
 	ss = str(ss)
 	max = -1
@@ -1052,8 +1121,23 @@ def select_dest_by_byte_order(bytes_list, u, ss, SP_list, execid_list):
 			dest = source
 			break
 
+	# FREYJA STREAMING
 	if max == 0:
-		dest = get_round_robin()
+		if data_pack.stream == True:
+			sp = data_pack.get_split_position()
+			ss = data_pack.get_split_shape()
+			stream_position = eval(sp)['z']-1
+
+			ratio_position = stream_position / float(eval(ss)['z'])
+
+			hdfs_str  = data_pack.stream_hdfs_file_name
+			hdfs_locations = get_hdfs_locations(hdfs_str, ratio_position, computing_unit_dict)
+
+			dest = schedule(hdfs_blk_locations=hdfs_locations, init=True, seq=stream_position)
+
+		else:
+			dest = get_round_robin()
+	
 	return dest	
 
 def check_source_is_available(source):
@@ -1128,7 +1212,7 @@ def make_buffer(dp, execid_list, SP_list=None, full_copy_range=None, count=None)
 	
 	bytes_list = make_bytes_list(u, SS, SP_list, full_copy_range)
 	
-	dest = select_dest_by_byte_order(bytes_list, u, SS, SP_list, execid_list)
+	dest = select_dest_by_byte_order(bytes_list, u, SS, SP_list, execid_list, data_pack=dp)
 
 	if dest == -1:
 		#print "DEST selection failed", dest
@@ -1602,7 +1686,12 @@ while flag != "finish":
 		comm.send(work_list, dest=source, tag=5)
 	elif flag == "update_computing_unit":
 		computing_unit_dict = comm.recv(source=source,    tag=5)
+		print computing_unit_dict
 		computing_unit_list = computing_unit_dict.keys()
+		for elem in computing_unit_dict:
+			host = computing_unit_dict[elem]['host']
+			task_allocation_dict[host] = 0
+
 	elif flag == "log":
 		log_type = comm.recv(source=source,    tag=5)
 		print "Scheduler log type changed to", log_type
@@ -1972,6 +2061,7 @@ while flag != "finish":
 		make_a_memcpy_task(source_package, dest_package, source, data_range)
 
 		launch_task()
+
 	elif flag == "reduce":
 		data_package = comm.recv(source=source, tag=5)
 		function_name = comm.recv(source=source, tag=5)

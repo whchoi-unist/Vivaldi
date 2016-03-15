@@ -1,5 +1,21 @@
 # small helper functions go here
 import time, numpy, sys, copy, ast, os
+import getpass
+import socket
+from StringIO import StringIO
+from hdfs import InsecureClient
+import pycurl
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
 
 VIVALDI_PATH = os.environ.get('vivaldi_path')
 
@@ -185,6 +201,42 @@ def make_memory_shape(shape, cms):
 	if cms != [1]: memory_shape = tuple(list(shape) + cms)
 	return tuple(memory_shape)
 
+
+def load_from_hdfs(data_package, hdfs_addr, hdfs_path):
+#def load_from_hdfs(data_package, file_name='CThead_uchar.raw'):
+	if log_type in ['time','all']: st = time.time()
+	dp = data_package
+	ds = dp.data_range
+	ds_seq = [ds[elem][1]-ds[elem][0] for elem in ['z', 'y', 'x'] if elem in ds]
+
+
+	while True:
+		try:
+			client = InsecureClient(hdfs_addr, user=getpass.getuser())
+			
+		
+			file_python_dtype = Vivaldi_dtype_to_python_dtype(dp.file_dtype)
+			file_bytes = get_bytes(file_python_dtype)
+		
+			print "START TO CONNECT HDFS"
+			bef = time.time()
+			with client.read(hdfs_path, offset=(ds_seq[1]*ds_seq[2]*ds['z'][0]*file_bytes),length=ds_seq[0]*ds_seq[1]*ds_seq[2]*file_bytes) as reader:
+				buf = reader.read()
+			aft = time.time()
+		
+			diff = aft - bef
+		
+			print "DATA LOADING ENDS -- time elapsed = %.03f (sec) , reading speed = %.03f MB/sec"%(diff, len(buf) / diff * (1024 ** -2))
+			data = numpy.fromstring(buf, dtype=file_python_dtype).reshape(ds_seq)
+
+			break
+
+		except:
+			print bcolors.WARNING + "Connection Broken" + bcolors.ENDC
+	
+
+	return data
+		
 #FREYJA STREAMING
 def load_data(data_package, data_range, fp=None):
 
@@ -828,3 +880,51 @@ def	get_valid_range(full_data_range, split_shape, split_position):
 		valid_range[axis] = (start, end)
 		
 	return valid_range
+
+
+# FREYJA STREAMING
+def get_hdfs_locations(hdfs_str, ratio_location, computing_unit_dict):
+	hdfs_addr = hdfs_str[:hdfs_str.rfind('/')]
+	hdfs_path = hdfs_str[hdfs_str.rfind('/')+1:]
+	url = "%s/webhdfs/v1/user/%s/%s?op=GET_BLOCK_LOCATIONS"%(hdfs_addr, getpass.getuser(), hdfs_path)
+
+	curl = pycurl.Curl()
+	buf = StringIO()
+
+	curl.setopt(pycurl.URL, url)
+	curl.setopt(pycurl.WRITEFUNCTION, buf.write)
+
+	curl.perform()
+
+	data = buf.getvalue()
+
+
+	# configuration
+	replications = 3
+	owner = "emerald"
+
+	total_count = data.count(owner) / replications
+	
+
+	head_buf = (1 + int(ratio_location*total_count)) * replications
+	hdfs_location = []
+	while data.find(owner)!=-1:
+		start = data.find(owner)
+		end = start + data[start:].find('"')
+		hey = data[start:end]
+		if len(hdfs_location) >= replications:
+			break
+	
+		key = hey
+	
+		data = data[data.find(owner)+len(owner):]
+	
+		if head_buf <= 0:
+			#logging[key] += 1
+			hdfs_location.append(key)
+		else:
+			head_buf -= 1
+
+	return hdfs_location
+
+

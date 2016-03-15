@@ -2,6 +2,7 @@ import sys, os, numpy, time
 from mpi4py import MPI
 
 from Vivaldi_load import *
+from Vivaldi_misc import *
 from Vivaldi_install_check import *
 import Vivaldi_dsl_functions
 
@@ -562,25 +563,27 @@ def Vivaldi_Gather(data_package):
 		data_memory_shape = dp.data_memory_shape
 		
 		dtype = dp.data_contents_memory_dtype
-		data = numpy.empty(data_memory_shape, dtype=dtype)
-		request = comm.Irecv(data, source=source,tag=57)
-		MPI.Request.wait(request)
+		#data = numpy.empty(data_memory_shape, dtype=dtype)
+		data = comm.recv(source=source,tag=57)
+		#request = comm.Irecv(data, source=source,tag=57)
+		#MPI.Request.wait(request)
 		
 		return data, data_package
 	#FREYJA STREAMING
 	# wati until data created, we don't know where the data will come from
-	if not dp.stream:
+	#if not dp.stream:
+	if True:
 		source = comm.recv(source=MPI.ANY_SOURCE,	 tag=5)
 		flag = comm.recv(source=source,				 tag=5)
 		task = comm.recv(source=source,				 tag=57)
 		halo_size = comm.recv(source=source,		 tag=57)
 		data, data_package = recv()
 
-	else:
-		for elem in range(dp.stream_count):
-			source = comm.recv(source=MPI.ANY_SOURCE, tag=25)
+	#else:
+		#for elem in range(dp.stream_count):
+			#source = comm.recv(source=MPI.ANY_SOURCE, tag=25)
 
-		data = "FINISH"
+		#data = "FINISH"
 
 
 	return data
@@ -791,7 +794,7 @@ def register_function_package(function_package):
 	global comm
 	dest = 1
 	import time	
-	time.sleep(2)
+	#time.sleep(2)
 	comm.send(0,					dest=dest,	  tag=5)
 	comm.send("function",			dest=dest,	  tag=5)
 	comm.send(function_package,	dest=dest,	  tag=52)
@@ -894,7 +897,7 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 			return_dtype = get_return_dtype(function_name, argument_package_list, function_code)
 			for elem in argument_package_list:
 				if isinstance(elem, Data_package):
-					if elem.stream:
+					if elem.stream and type(work_range) != dict:
 						return elem.data_contents_dtype
 			if return_dtype.endswith('_volume'):
 				print "Vivaldi_warning"
@@ -927,10 +930,8 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 	# register function to scheduler
 	def get_function_package(function_name, argument_package_list, return_package, work_range, merge_func='', merge_order=''):
 		fp = Function_package()
-		stream_flag = False
 		for elem in argument_package_list:
 			if elem.stream == True:
-				stream_flag = True
 				fp.stream = True
 				fp.stream_count = elem.stream_count
 		fp.set_function_name(function_name)
@@ -949,6 +950,7 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 		fp.output = return_package
 		return fp
 	function_package = get_function_package(function_name, argument_package_list, return_package, work_range, merge_func, merge_order)
+
 
 	
 	# for david rendering
@@ -1088,6 +1090,7 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 	return return_package
 
 def run_function(return_name=None, func_name='', execid=[], work_range=None, args=[], arg_names=[], dtype_dict={}, output_halo=0, halo_dict={}, split_dict={}, merge_func='', merge_order=''): # compatibility to old version
+
 	function_name = func_name
 	def get_argument_package_list(args, arg_names, split_dict, halo_dict):
 		i = 0
@@ -1102,12 +1105,18 @@ def run_function(return_name=None, func_name='', execid=[], work_range=None, arg
 				argument_package = None
 				# get modifier split and halo
 				split = split_dict[data_name] if data_name in split_dict else {}
+
 				#FREYJA STREAMING
 				if isinstance(arg, Data_package):
-					if arg.stream:
-						split = {'z':len(arg.stream_file_list)}
-						split_dict[data_name] = split
-						split_dict[return_name] = split
+					if isinstance(work_range, Data_package):
+						if arg.stream and (arg.data_shape == work_range.data_shape):
+							split = {'z':arg.stream_count}
+							split_dict[data_name] = split
+							split_dict[return_name] = split
+					elif isinstance(work_range, dict):
+						if arg.stream:
+							split = {'z':arg.stream_count}
+							split_dict[data_name] = split
 				
 				halo = halo_dict[data_name] if data_name in halo_dict else 0 
 				# apply to data_package
@@ -1174,7 +1183,7 @@ def run_function(return_name=None, func_name='', execid=[], work_range=None, arg
 
 		return None, parallel, args
 	
-	rt =  parallel(function_name, argument_package_list, work_range, execid, output_halo, output_split, merge_func, merge_order)
+	rt = parallel(function_name, argument_package_list, work_range, execid, output_halo, output_split, merge_func, merge_order)
 	
 	return rt
 

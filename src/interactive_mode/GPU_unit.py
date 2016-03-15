@@ -17,6 +17,8 @@ from texture import *
 from numpy.random import rand
 from Vivaldi_memory_packages import Data_package
 import traceback
+import socket
+from hdfs import InsecureClient
 
 import os, sys
 VIVALDI_PATH = os.environ.get('vivaldi_path')
@@ -46,7 +48,7 @@ def wait_data_arrive_streaming(data_package, streaming_cnt, stream=None, gmem_se
 			dest_devptr, new_usage = malloc_with_swap_out(output_package.data_bytes)
 			output_package.set_usage(new_usage)
 			
-			cuda.memset_d8(dest_devptr, 0, output_package.data_bytes)
+			#cuda.memset_d8(dest_devptr, 0, output_package.data_bytes)
 		else:
 			# we already have cuda memory allocation
 			# if there are enough halo, we can use exist buffer instead dest_package
@@ -118,80 +120,35 @@ def wait_data_arrive_streaming(data_package, streaming_cnt, stream=None, gmem_se
 		dest_package = first['task'].source
 
 		if dest_package.devptr == None:
-			if data_package.data_halo == 0:
+			#if data_package.data_halo == 0:
+			if True:
 				stream_position = eval(sp)['z']-1
-				data_package.file_name += data_package.stream_file_list[stream_position]
+				hdfs_str  = data_package.stream_hdfs_file_name
+				hdfs_addr = hdfs_str[:hdfs_str.rfind('/')]
+				hdfs_path = hdfs_str[hdfs_str.rfind('/')+1:]
 	
 				# for local data load
+				#data_package.file_name += data_package.stream_file_list[stream_position]
 				#data_package.file_name = '/local/whchoi/data/stream/'+data_package.stream_file_list[stream_position]
 	
 				#print data_package.info()
-				fp = open(data_package.file_name,'rb')
 				#print u, ss, sp, device_number
 	  			
 				import time
 				t_before = time.time()
 	   			#print "START TO LOAD DATA from %d th sequence"%(stream_position)
-	   			data = load_data(data_package, data_package.data_range, fp=fp)
+				data = load_from_hdfs(data_package, hdfs_addr, hdfs_path)
 	   			#print "END TO LOAD DATA from %d th sequence"%(stream_position)
 				t_diff = time.time() - t_before
 				print "%d th processing data load speed : %.3f MB/s"%(stream_position, data.size / 1024.0/1024/t_diff)
 
-			else:
-				stream_position = eval(sp)['z']-1
-
-				print device_number, "starts load the data"
-				import time
-				t_before = time.time()
-				file_name = data_package.file_name + data_package.stream_file_list[stream_position]
-				fp = open(file_name,'rb')
-	   			data = load_data(data_package, data_package.data_range, fp=fp)
-				halo = data_package.data_halo
-				print device_number, "target block load finished"
-
-
-
-				if data_package.data_range['z'][0] == data_package.full_data_range['z'][0]:
-					pass
-				else:
-					prev_file_name = data_package.file_name + data_package.stream_file_list[stream_position-1]
-					fp = open(prev_file_name,'rb')
-	   				prev = load_data(data_package, data_package.data_range, fp=fp)
-					prev_data = prev[-halo:]
-					data = numpy.concatenate((prev_data, data), axis=0)
-					print device_number, "up block load finished"
-					del prev
-					del prev_data
-
-
-				if data_package.data_range['z'][1] == data_package.full_data_range['z'][1]:
-					pass
-				else:
-					next_file_name = data_package.file_name + data_package.stream_file_list[stream_position+1]
-					fp = open(next_file_name,'rb')
-	   				next = load_data(data_package, data_package.data_range, fp=fp)
-					next_data = next[:halo]
-					data = numpy.concatenate((data, next_data), axis=0)
-					print device_number, "down block load finished"
-					del next 
-					del next_data
-
-				t_diff = time.time() - t_before
-				print device_number, "%d th processing data load speed : %.3f MB/s"%(stream_position, data.size / 1024.0/1024/t_diff)
-
 					
 					
-#or dest_package.data_range['z'][1] == dest_package.full_data_range['z'][1]:
-				
-				
-				
-
 			data_list[u][ss][sp].data = data
+			data_list[u][ss][sp].devptr = data
 	   		#data_package.data = data
 
 
-		#refresh dest_package
-		#dest_package = dest_package.copy()
 		dest_package.split_data_range_streaming(streaming_cnt)
 
 		du, dss, dsp = dest_package.get_id()
@@ -223,7 +180,7 @@ def wait_data_arrive_streaming(data_package, streaming_cnt, stream=None, gmem_se
 		for elem in recv_list[u][ss][sp]:
 			# wait data arrive
 
-			MPI.Request.Wait(elem['request'])
+			#MPI.Request.Wait(elem['request'])
 			t_data = elem['data']
 
 			t_devptr = t_data
@@ -264,9 +221,7 @@ def wait_data_arrive_streaming(data_package, streaming_cnt, stream=None, gmem_se
 		data_package.split_data_range_streaming(streaming_cnt)
 
 
-
 		du, dss, dsp = data_package.get_id()
-
 
 		# check data exist
 		data_devptr = None
@@ -323,7 +278,6 @@ def wait_data_arrive_streaming(data_package, streaming_cnt, stream=None, gmem_se
 		#print data_list[du][dss][dsp]
 		#print "READING", data_list, data_package.memory_type
 		
-
 		pass
 
 def wait_data_arrive(data_package, stream=None):
@@ -411,8 +365,8 @@ def wait_data_arrive(data_package, stream=None):
 		# write from temp data to dest data
 		for elem in recv_list[u][ss][sp]:
 			# wait data arrive
-			if 'request' in elem: 
-				if elem['request'] != None:MPI.Request.Wait(elem['request'])
+			#if 'request' in elem: 
+				#if elem['request'] != None:MPI.Request.Wait(elem['request'])
 				
 			# memory copy have release
 			if 'mem_release' in elem:
@@ -472,6 +426,7 @@ def wait_data_arrive(data_package, stream=None):
 			if u not in data_list: data_list[u] = {}
 			if ss not in data_list[u]: data_list[u][ss] = {}
 		data_list[u][ss][sp] = dest_package
+		
 
 		del recv_list[u][ss][sp]
 		if recv_list[u][ss] == {}: del recv_list[u][ss]
@@ -512,17 +467,19 @@ def send(data, data_package, dest=None, gpu_direct=True):
 			buf = numpy.empty(shape, dtype=dtype)
 			cuda.memcpy_dtoh_async(buf, data, stream=stream_list[1])
 
-			request = comm.Isend(buf, dest=dest, tag=57)
-			if VIVALDI_BLOCKING: MPI.Request.Wait(request)
-			s_requests.append((request, buf, None))
+			comm.send(buf, dest=dest, tag=57)
+			#request = comm.Isend(buf, dest=dest, tag=57)
+			#if VIVALDI_BLOCKING: MPI.Request.Wait(request)
+			#s_requests.append((request, buf, None))
 			
 	else: # data in the CPU
 		# want to use GPU direct, not exist case
 		# not want to use GPU direct
 		if dp.data_dtype == numpy.ndarray and dp.stream: 
-			request = comm.Isend(data, dest=dest, tag=57)
-			if VIVALDI_BLOCKING: MPI.Request.Wait(request)
-			s_requests.append((request, data, None))
+			comm.send(data, dest=dest, tag=57)
+			#request = comm.Isend(data, dest=dest, tag=57)
+			#if VIVALDI_BLOCKING: MPI.Request.Wait(request)
+			#s_requests.append((request, data, None))
 			
 	if log_type in ['time','all']:
 		u = dp.unique_id
@@ -553,12 +510,17 @@ def recv():
 		bytes = dp.data_bytes
 		devptr, usage = malloc_with_swap_out(bytes)
 		
-		buf = MPI.make_buffer(devptr.__int__(), bytes)
-		request = comm.Irecv([buf, MPI.BYTE], source=source, tag=57)
+		#buf = MPI.make_buffer(devptr.__int__(), bytes)
+		#request = comm.Irecv([buf, MPI.BYTE], source=source, tag=57)
+		buf = comm.recv(source=source, tag=57)
 
-		if VIVALDI_BLOCKING: MPI.Request.Wait(request)
+		import Image
+		Image.fromarray(buf.astype(numpy.uint8)).save("/home/freyja/tmp_result.tif")
 
-		return devptr, data_package, request, buf
+		cuda.memcpy_htod(devptr, buf)
+		
+
+		return devptr, data_package, None, buf
 	else:
 		bytes = dp.data_bytes
 		data_dtype = dp.data_dtype
@@ -566,7 +528,7 @@ def recv():
 			data_memory_shape = dp.data_memory_shape
 			dtype = dp.data_contents_memory_dtype
 			data = numpy.empty(data_memory_shape, dtype=dtype)
-			if bytes > 2 * 1024 ** 3:
+			if bytes > 2 * 1024 ** 3 and not dp.stream:
 				blocks = bytes / (2*1024**3) + 1
 				total_len = len(data)
 				transfer_unit = total_len/ blocks
@@ -577,7 +539,9 @@ def recv():
 					data[begin:begin+transfer_unit] = comm.recv(source=source, tag=57+elem)
 					begin += transfer_unit
 			else:
-				request = comm.Irecv(data, source=source, tag=57)
+				#request = comm.Irecv(data, source=source, tag=57)
+				request = None
+				data = comm.recv(source=source, tag=57)
 			
 			if RECV_CHECK: # recv check
 				MPI.Request.Wait(request)
@@ -752,6 +716,8 @@ def memcpy_p2p_recv(task, data_halo):
 	if dsp not in data_list[du][dss]:
 		data_exist = False
 		data_list[du][dss][dsp] = dest_package
+		
+
 
 
 	# data already exist
@@ -759,7 +725,7 @@ def memcpy_p2p_recv(task, data_halo):
 	if dss not in recv_list[du]: recv_list[du][dss] = {}
 	if dsp not in recv_list[du][dss]: recv_list[du][dss][dsp] = []
 	recv_list[du][dss][dsp].append({'request':request,'task':task, 'data':data, 'data_package':data_package, 'buf': buf, 'temp_data':True,'usage':dp.data_bytes})
-	
+
 	notice(dest_package)
 	return 
 def mem_release(data_package):
@@ -1492,9 +1458,9 @@ def run_function(function_package, function_name):
 #	cuda.memcpy_htod_async(bandwidth, numpy.float32(fp.TF_bandwidth), stream=stream)
 #	cuda.memcpy_htod_async(front_back, numpy.int32(fp.front_back), stream=stream)
 
-	tf = mod.get_texref('TFF')	
-	tf1 = mod.get_texref('TFF1')
-	bandwidth,_ = mod.get_global('TF_bandwidth')
+	#tf = mod.get_texref('TFF')	
+	#tf1 = mod.get_texref('TFF1')
+	#bandwidth,_ = mod.get_global('TF_bandwidth')
 	
 	import numpy
 	if numpy.sum(fp.Sliders) != 0:
@@ -1505,22 +1471,23 @@ def run_function(function_package, function_name):
 		cuda.memcpy_htod_async(sld_op, fp.Slider_opacity, stream=stream)
 	
 	if fp.transN != 0:
-		tf = mod.get_texref('TFF')
-		tf1 = mod.get_texref('TFF1')
-		bandwidth,_ = mod.get_global('TF_bandwidth')
+		#tf = mod.get_texref('TFF')
+		#tf1 = mod.get_texref('TFF1')
+		#bandwidth,_ = mod.get_global('TF_bandwidth')
 
-		if fp.update_tf == 1 and fp.trans_tex != None:
-			global tfTex
-			tfTex = fp.trans_tex
-		if fp.update_tf2 == 1 and fp.trans_tex != None:
-			global tfTex2
-			tfTex2  = fp.trans_tex
+		#if fp.update_tf == 1 and fp.trans_tex != None:
+			#global tfTex
+			#tfTex = fp.trans_tex
+		#if fp.update_tf2 == 1 and fp.trans_tex != None:
+			#global tfTex2
+			#tfTex2  = fp.trans_tex
 
-		tf.set_filter_mode(cuda.filter_mode.LINEAR)
-		tf1.set_filter_mode(cuda.filter_mode.LINEAR)
-		cuda.bind_array_to_texref(cuda.make_multichannel_2d_array(tfTex.reshape(1,256,4), order='C'), tf)
-		cuda.bind_array_to_texref(cuda.make_multichannel_2d_array(tfTex2.reshape(1,256,4), order='C'), tf1)
-		cuda.memcpy_htod_async(bandwidth, numpy.array(fp.TF_bandwidth,dtype=numpy.float32), stream=stream)
+		#tf.set_filter_mode(cuda.filter_mode.LINEAR)
+		#tf1.set_filter_mode(cuda.filter_mode.LINEAR)
+		#cuda.bind_array_to_texref(cuda.make_multichannel_2d_array(tfTex.reshape(1,256,4), order='C'), tf)
+		#cuda.bind_array_to_texref(cuda.make_multichannel_2d_array(tfTex2.reshape(1,256,4), order='C'), tf1)
+		#cuda.memcpy_htod_async(bandwidth, numpy.array(fp.TF_bandwidth,dtype=numpy.float32), stream=stream)
+		pass
 
 
 	# for plane copy
@@ -1575,7 +1542,7 @@ def run_function(function_package, function_name):
 
 		print device_number, "PROCESSING START"
 		for elem in range(local_iter):
-			print device_number, "%d th iter"%(elem+1)
+			#print device_number, "%d th iter"%(elem+1)
 			cuda_args = []
 			
 			data_exist = True
@@ -1609,6 +1576,8 @@ def run_function(function_package, function_name):
 				FD.append(ad)
 			else:
 				dest_output = func_output.copy()
+				dest_output.disk_file_size   = disk_file_size
+				dest_output.disk_block_size  = disk_block_size
 				dest_output.split_data_range_streaming(elem)
 				work_range = dest_output.data_range
 				bytes = dest_output.data_bytes
@@ -1636,11 +1605,6 @@ def run_function(function_package, function_name):
 			block, grid = range_to_block_grid(work_range)
 			cuda_args = [devptr] + cuda_args
 			
-		#	print "GPU", rank, "BEFORE RECV", time.time()
-			# Recv data from other process
-	
-		#	print "GPU", rank, "Recv Done", time.time()
-			# set cuda arguments 
 			one_time_devptr = []
 			for data_package in args:
 				data_name = data_package.data_name
@@ -1675,16 +1639,7 @@ def run_function(function_package, function_name):
 					ss = data_package.get_split_shape()
 					sp = data_package.get_split_position()
 					dp = data_list[u][ss][sp] # it must be fixed to data_package later
-					#print "ACTION",data_list, dp
-					#print dp.memory_type
-					#dp = data_package
-					#print 'USING', dp.get_id()
-					#print dp.info(), dp.memory_type
-					#print 'READING', dp, u, ss, sp
-					#print dp
-	
-					#if dp.devptr == None:
-						#print "NOTIFI"
+
 					memory_type = dp.memory_type
 					if memory_type == 'devptr':
 						#print "USING", dp.devptr
@@ -1718,15 +1673,11 @@ def run_function(function_package, function_name):
 			kernel_finish = cuda.Event()
 			func( *cuda_args, block=block, grid=grid, stream=stream_list[0])
 			kernel_finish.record(stream=stream_list[0])
+
 			ctx.synchronize()
 			st_diff = time.time() - st
-			print "GPU TIME", st_diff
+			print "Stream GPU TIME", st_diff
 
-			#print "Execution Speed %.0f"%(
-		#	print "FFFFOOo", func_output.info()
-		#	print_devptr(cuda_args[0], func_output)
-			
-			
 			u, ss, sp = func_output.get_id()
 			target = (u,ss,sp)
 			
@@ -1743,6 +1694,7 @@ def run_function(function_package, function_name):
 			stream_buffer.append(buf)
 
 	
+			print "TARGET", target
 			Event_dict[target] = kernel_finish
 			if target not in valid_list:
 				valid_list.append(target)
@@ -1753,27 +1705,20 @@ def run_function(function_package, function_name):
 		for elem in range(1,local_iter):
 			result_buffer = numpy.concatenate((result_buffer, stream_buffer[elem]), axis=0)
 		del(stream_buffer)
+
+
 		
 		func_output.devptr = result_buffer
-		#func_output.memory_type = 'memory'
-
-		#print "FROM STREAMING PROCESSING"
-		#print "DISK_FILE_SIZE  : ", disk_file_size
-		#print "DISK_BLOCK_SIZE : ", disk_block_size
-		#print "STEP            : ", local_iter
-
-		#u, ss, sp = func_output.get_id()
-		#if u not in data_list: data_list[u] = {}
-		#if ss not in data_list[u]: data_list[u][ss] = {}
-		#data_list[u][ss][sp] = func_output 
-
 
 		#print func_output.info()
 		t_time = time.time()
-		open("/home/whchoi/vivaldi/data/Stream/result/result%03d_%d.raw"%(func_output.split_position['z'],device_number),'wb').write(func_output.devptr)
-		#open("/local/whchoi/data/stream/result/result%03d_%d.raw"%(func_output.split_position['z'],device_number),'wb').write(func_output.devptr)
+		# save at NFS
+		#open("/home/freyja/result/result%03d_%d.raw"%(func_output.split_position['z'],device_number),'wb').write(func_output.devptr)
+
+		# save at Local
+		open("/scratch/freyja/result/result%03d_%d.raw"%(func_output.split_position['z'],device_number),'wb').write(func_output.devptr)
 		t_diff = time.time() - t_time
-		print device_number, "DONE for %s"%(func_output.split_position['z']), "elapsed time to save result %.03f"%(func_output.devptr.nbytes/t_diff*1024.0**-2)
+		#print device_number, "DONE for %s"%(func_output.split_position['z']), "elapsed time to save result %.03f"%(func_output.devptr.nbytes/t_diff*1024.0**-2)
 		del(result_buffer)
 
 		comm.send(rank,			dest=0,	tag=25)
@@ -1784,6 +1729,7 @@ def run_function(function_package, function_name):
 			ms = 1000*t
 
 			log("rank%d, %s,  \"%s\", u=%d, GPU%d function running,,, time: %.3f ms "%(rank, func_output.data_name, function_name, u, device_number,  ms),'time',log_type)
+
 		#log("rank%d, \"%s\", GPU%d function finish "%(rank, function_name, device_number),'general',log_type)
 		
 		###################################################################################
@@ -1796,6 +1742,10 @@ def run_function(function_package, function_name):
 					if ss in data_list[u]:
 						if sp in data_list[u][ss]:
 							del(data_list[u][ss][sp].devptr)
+						del(data_list[u][ss][sp])
+					del(data_list[u][ss])
+				del(data_list[u])
+					
 	
 		func_output.devptr = None
 		
@@ -2043,7 +1993,9 @@ while flag != "finish":
 	source = comm.recv(source=MPI.ANY_SOURCE,    tag=5)
 	flag = comm.recv(source=source,              tag=5)
 
+
 	if log_type != False: print "GPU:", rank, "source:", source, "flag:", flag 
+
 	# interactive mode functions
 	if flag == "log":
 		log_type = comm.recv(source=source,    tag=5)
@@ -2236,7 +2188,7 @@ while flag != "finish":
 						kernel_function_name += elem.data_contents_dtype
 				return kernel_function_name		
 			kernel_function_name = get_kernel_function_name(function_package)
-			
+
 			# compile if kernel function not exist
 			if kernel_function_name not in func_dict:
 				compile_for_GPU(function_package, kernel_function_name)
