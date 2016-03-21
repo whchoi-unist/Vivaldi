@@ -117,11 +117,14 @@ class Data_package():
 			self.buffer_halo = None
 			self.buffer_bytes = None
 			
+			# data characteristic
 			self.out_of_core = False
 			self.file_name = None
 			self.file_dtype = None
 			self.extension = None
 			self.normalize = False
+			self.data_source = None
+			self.data_local_path = ''
 
 			self.data = None
 			self.devptr = None
@@ -267,6 +270,9 @@ class Data_package():
 	def get_bytes(self):
 		if self.data_bytes == None: return self.full_data_bytes
 		return self.data_bytes
+	def set_data_source(self, source):
+		self.data_source = source
+		
 	def set_dtype(self, dtype):
 		self.set_data_contents_dtype(dtype)
 		self.set_data_range(self.data_range)
@@ -422,6 +428,7 @@ class Data_package():
 		sbuf += self.pt("file_name                          ", self.file_name)
 		sbuf += self.pt("extension                          ", self.extension)
 		sbuf += self.pt("file_dtype                         ", self.file_dtype)
+		sbuf += self.pt("data_source                        ", self.data_source)
 
 		#sbuf += self.pt("modifier, halo                     ", self.halo)
 		#sbuf += self.pt("modifier, split                    ", self.split)

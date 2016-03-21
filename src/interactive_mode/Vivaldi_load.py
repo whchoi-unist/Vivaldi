@@ -122,6 +122,7 @@ def load_data_3d(file_full_name, dtype=None, out_of_core=False):
 			temp.set_data_contents_dtype(dtype)
 	
 			data_range = shape_to_range(shape)
+			temp.data_source = "hdd"
 
 			temp.set_data_range(data_range)
 			temp.set_buffer_range(data_range)
@@ -155,9 +156,14 @@ def load_data_3d(file_full_name, dtype=None, out_of_core=False):
 			temp.data_dtype = numpy.ndarray
 			temp.file_name = path
 			import re
-			temp.stream_file_list = re.sub(' +',' ',file_info['Filenames']).split(' ')
-			temp.stream_count = len(temp.stream_file_list)
+			temp.stream_hdfs_file_name = file_info['Hdfs_path']
+			
 
+
+
+			temp.stream_count = shape[0] / temp.disk_file_size
+
+			#print temp.stream_count, shape[0], temp.disk_file_size
 			temp.file_dtype = python_dtype_to_Vivaldi_dtype(contents_dtype)
 
 			temp.buffer_dtype = numpy.ndarray
@@ -169,45 +175,7 @@ def load_data_3d(file_full_name, dtype=None, out_of_core=False):
 	
 			data_range = shape_to_range(shape)
 
-			temp.set_data_range(data_range)
-			temp.set_buffer_range(data_range)
-			temp.set_full_data_range(data_range)
-			return temp
-
-		# OLD stream format
-		elif el == 'streamaaaa':
-			file_info = matrixio.read_stream(file_full_name)
-			prefix = file_info['FilePrefix']
-			assert(prefix != None)
-
-			if 'Start' in file_info:
-				start_cnt = int(file_info['Start'])
-
-			# get resolution
-			counter_size = prefix.count('@')
-			filename = file_full_name[:file_full_name.rfind('/')+1]
-			filename += prefix[:prefix.find('@')]+'%0'+str(counter_size)+'d'+prefix[prefix.rfind('.'):]
-			sample_image = matrixio.read_2d_data(filename%(start_cnt))
-
-
-			shape = sample_image.shape
-			shape = (int(file_info['Count']),shape[1], shape[0])
-
-			temp = Data_package()
-			temp.out_of_core = True
-			temp.stream = True
-			temp.data_dtype = numpy.ndarray
-			temp.file_name = filename
-			temp.file_dtype = python_dtype_to_Vivaldi_dtype(sample_image.dtype)
-
-			temp.buffer_dtype = numpy.ndarray
-			if dtype != None: dtype = dtype
-			else: dtype = temp.file_dtype
-			temp.set_data_contents_dtype(dtype)
-	
-			data_range = shape_to_range(shape)
-
-
+			temp.data_source = "hdfs"
 			temp.set_data_range(data_range)
 			temp.set_buffer_range(data_range)
 			temp.set_full_data_range(data_range)

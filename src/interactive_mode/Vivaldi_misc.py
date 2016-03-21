@@ -16,6 +16,23 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+def print_green(source, location=' '):
+	print bcolors.OKGREEN, source, location,  bcolors.ENDC
+
+def print_red(source, location=' '):
+	print bcolors.FAIL, source, location, bcolors.ENDC
+
+def print_blue(source, location=' '):
+	print bcolors.OKBLUE, source, location, bcolors.ENDC
+
+def print_yellow(source, location=' '):
+	print bcolors.WARNING, source, location, bcolors.ENDC
+
+def print_purple(source, location=' '):
+	print bcolors.HEADER, source, location, bcolors.ENDC
+
+def print_bold(source, location=' '):
+	print bcolors.BOLD, source, location, bcolors.ENDC
 
 VIVALDI_PATH = os.environ.get('vivaldi_path')
 
@@ -218,7 +235,7 @@ def load_from_hdfs(data_package, hdfs_addr, hdfs_path):
 			file_python_dtype = Vivaldi_dtype_to_python_dtype(dp.file_dtype)
 			file_bytes = get_bytes(file_python_dtype)
 		
-			print "START TO CONNECT HDFS"
+			#print "START TO CONNECT HDFS"
 			bef = time.time()
 			with client.read(hdfs_path, offset=(ds_seq[1]*ds_seq[2]*ds['z'][0]*file_bytes),length=ds_seq[0]*ds_seq[1]*ds_seq[2]*file_bytes) as reader:
 				buf = reader.read()
@@ -226,7 +243,7 @@ def load_from_hdfs(data_package, hdfs_addr, hdfs_path):
 		
 			diff = aft - bef
 		
-			print "DATA LOADING ENDS -- time elapsed = %.03f (sec) , reading speed = %.03f MB/sec"%(diff, len(buf) / diff * (1024 ** -2))
+			print "DATA LOADING ENDS from %s -- time elapsed = %.03f (sec) , reading speed = %.03f MB/sec"%(socket.gethostname(), diff, len(buf) / diff * (1024 ** -2))
 			data = numpy.fromstring(buf, dtype=file_python_dtype).reshape(ds_seq)
 
 			break
@@ -317,26 +334,11 @@ def load_data(data_package, data_range, fp=None):
 		file_python_dtype = Vivaldi_dtype_to_python_dtype(dp.file_dtype)
 		file_bytes = get_bytes(file_python_dtype)*chan[0]
 
-		if not data_package.stream:
-			for z in range(data_range['z'][0], data_range['z'][1]):
-				idx = z * (X*Y) * file_bytes
-				f.seek(idx,0)
-				ts = f.read((X*Y) * file_bytes)
-				ss += ts
-
-		else:
-			print "THIS IS ACTUAL READING PART"
-			import time
-			prev = time.time()
-			ss = f.read()
-			diff = time.time()-prev
-			print "DATA LOADING ENDS -- time elapsed = %.03f (sec) , reading speed = %.03f MB/sec"%(diff, len(ss) / diff * 10 ** -6)
-			data_halo = data_package.data_halo
-			data_range = data_range
-			full_data_range = data_package.full_data_range
-			new_z_start = data_range['z'][0] + data_halo if data_range['z'][0] != full_data_range['z'][0] else data_range['z'][0]
-			new_z_end = data_range['z'][1] - data_halo if data_range['z'][1] != full_data_range['z'][1] else data_range['z'][1]
-			data_range['z'] = (new_z_start, new_z_end)
+		for z in range(data_range['z'][0], data_range['z'][1]):
+			idx = z * (X*Y) * file_bytes
+			f.seek(idx,0)
+			ts = f.read((X*Y) * file_bytes)
+			ss += ts
 
 		#import time
 		#prev = time.time()
@@ -364,6 +366,41 @@ def load_data(data_package, data_range, fp=None):
 
 
 	return buf
+
+
+# Work only for Z axis read
+def load_data_from_local(data_package, file_name, halo=None, loc=None):
+	f = open(file_name, "rb")
+	dp = data_package
+	data_shape = dp.data_shape
+
+	if len(data_shape) == 3:
+		z = data_shape[0]
+		y = data_shape[1]
+		x = data_shape[2]
+
+		bytes = get_bytes(dp.data_contents_memory_dtype)
+
+		if halo != None:
+			z = halo
+	
+			if loc == 'end':
+				loc = 2
+				f.seek(-x*y*z*bytes, loc)
+
+			data = f.read(x*y*z*bytes)
+
+		else:
+			data = f.read()
+			z = len(data) / (bytes * x* y)
+
+
+		data = numpy.fromstring(data, dtype=Vivaldi_dtype_to_python_dtype(dp.data_contents_memory_dtype)).reshape(z, y, x)
+		
+		#print_bold(data.shape)
+
+	return data
+
 
 def make_range_list(full_range, split, halo=0):
 	# make data range list
@@ -903,8 +940,9 @@ def get_hdfs_locations(hdfs_str, ratio_location, computing_unit_dict):
 	replications = 3
 	owner = "emerald"
 
-	total_count = data.count(owner) / replications
+	total_count = data.count(owner) / replications - 1
 	
+	#if total_count >= ratio_location* total_count
 
 	head_buf = (1 + int(ratio_location*total_count)) * replications
 	hdfs_location = []

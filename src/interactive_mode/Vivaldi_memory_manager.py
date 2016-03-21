@@ -3,6 +3,8 @@ from Vivaldi_misc import *
 from Vivaldi_load import *
 from Vivaldi_memory_packages import *
 
+import traceback
+
 
 # mpi init
 parent = MPI.Comm.Get_parent()
@@ -92,12 +94,16 @@ def memcpy_p2p(source, dest, task):
 	comm.send(dest,				dest=source,		tag=56)
 	comm.send(task,				dest=source,		tag=56)
 	
+	#traceback.print_stack()
+	#print_yellow("FROM %s, TO %s"%(source, dest))
+	
 # scheduling
 def temp_func1(for_save=False, source_list=None):
 	return_flag = True
 
 	if for_save: cur_dict = memcpy_tasks_to_harddisk
 	else: cur_dict = memcpy_tasks
+
 
 	source_list = [elem for elem in source_list if elem in idle_list]
 	if source_list == []:return False
@@ -106,6 +112,7 @@ def temp_func1(for_save=False, source_list=None):
 		source_list.remove(2)
 		source_list.append(2)
 
+	#print_red("%s \n %s"%(str(cur_dict), str(valid_list)))
 	for u in cur_dict.keys():
 		if u not in valid_list:continue
 		for ss in cur_dict[u].keys():
@@ -157,6 +164,8 @@ def temp_func1(for_save=False, source_list=None):
 						"""
 					elif task.start == None:
 						cur_list = valid_list[u][ss][sp] # valid value
+						#print_green("%s %s"%(valid_list, source_list))
+						#print_blue(sp)
 						f_source_list = [elem for elem in source_list if elem in cur_list]
 	
 						dest = task.execid
@@ -170,7 +179,8 @@ def temp_func1(for_save=False, source_list=None):
 							if dest == 1: flag = 2
 
 #							log("Copy %d to %d"%(source, dest),'progress', log_type)
-#							print "Copy", source, dest, "DDDDDDDD", idle_list, source_list, time.time(), u, ss, sp
+							#print "Copy", source, dest, "DDDDDDDD", idle_list, source_list, time.time(), u, ss, sp
+							#print_red("PRINT HALOS %d %d"%(task.source.data_halo, task.dest.data_halo))
 
 							memcpy_p2p(source, dest, task)
 							#print source.info()
@@ -207,6 +217,7 @@ def temp_func2(source_list=None): # dynamic function execution
 
 	task_list = function_list
 	return_flag = False
+	#print_green("Flag print %s"%str(task_list))
 	for elem in list(task_list):
 		if cur_list == []:break
 		# check execid is available for this functions
@@ -241,8 +252,11 @@ def temp_func2(source_list=None): # dynamic function execution
 			avail_set[u] = []
 
 			for data_halo in remaining_write_count_list[u][ss][sp]:
-				if data_halo < arg.data_halo: continue
+				if data_halo < arg.data_halo: 
+					continue
 				for source in remaining_write_count_list[u][ss][sp][data_halo]:
+					#print_yellow("(u, ss, sp, data_halo) = (%s %s %s %s)"%(u, ss, sp, data_halo))
+					#print_yellow("%s %s"%(source, remaining_write_count_list[u][ss][sp][data_halo]))
 					if source not in avail_set[u] and remaining_write_count_list[u][ss][sp][data_halo][source] <= 0:
 						avail_set[u].append(source)
 
@@ -256,13 +270,24 @@ def temp_func2(source_list=None): # dynamic function execution
 			t = [i for i in t_list if i in avail_set[u]]
 			t_list = t
 
+		#print_purple("*****************************************")
+		#for elem in remaining_write_count_list:
+			#print_purple("====================================")
+			#print_red(elem)
+			#print_green(remaining_write_count_list[elem])
+		#print_purple("*****************************************")
+
+		#print_green("SHOW FLAG %s"%flag)
+		#print_green("memcpy_task %s"%str(memcpy_tasks))
 		# data not exist
 		# we have to make
 		if flag == 1: continue
 
 		# data creation is already started.
 		# we can start this function if we wait
+		# to update neibor halos
 		if flag == 2: continue
+
 
 		# all data exist 
 		if VIVALDI_SCHEDULE == 'round_robin' and fp.reserved == False:
@@ -350,10 +375,10 @@ def temp_func2(source_list=None): # dynamic function execution
 					del reserved_dict[fp.dest]
 	
 			stream_catch = False
-			if fp.stream == True:
+			if True:
 				fn_args = fp.function_args
 				for elem in fn_args:
-					if elem.stream == True:
+					if elem.data_source in ['hdfs']:
 						sp = elem.get_split_position()
 						ss = elem.get_split_shape()
 						stream_position = eval(sp)['z']-1
@@ -363,8 +388,19 @@ def temp_func2(source_list=None): # dynamic function execution
 						stream_catch = True
 						hdfs_str  = elem.stream_hdfs_file_name
 						hdfs_locations = get_hdfs_locations(hdfs_str, ratio_position, computing_unit_dict)
-						
 
+					elif elem.data_source in ['local']:
+						sp = elem.get_split_position()
+						ss = elem.get_split_shape()
+						stream_position = eval(sp)['z']-1
+						hdfs_locations = {}
+						stream_catch = True
+						print
+
+					else:
+						pass
+
+			
 
 			il = [elem for elem in t_list if elem in idle_list]
 			if il != [] and il != [2]:
@@ -389,6 +425,7 @@ def temp_func3():
 	for elem in data_list:
 		data_package = elem[0]
 		execid_list = elem[1]
+		#print_green(data_package.info())
 		if idle_list == [] or idle_list ==[2]:break # reader cannot be destination of making data
 		dp = data_package
 
@@ -485,6 +522,9 @@ def launch_task(source_list=None):
 	# from hard disk
 	if 2 in idle_list:
 		temp_func1(source_list=[2]) # memory copy for already assigned memory copy tasks
+	
+
+
 
 def schedule(execid_list=None, idle=False, hdfs_blk_locations={}, init=False, seq = -1):
 	#if execid_list == None:
@@ -513,6 +553,7 @@ def schedule(execid_list=None, idle=False, hdfs_blk_locations={}, init=False, se
 			dest = source
 			min = val
 
+
 	#print "DEST", dest, type(dest), cur_list
 	if dest == None:
 		# no idle process
@@ -523,14 +564,22 @@ def schedule(execid_list=None, idle=False, hdfs_blk_locations={}, init=False, se
 		task_allocation_dict[dest_to_host(dest)] += 1
 
 	else:
-		dest = scheduled_dict[seq]
+		if seq in scheduled_dict:
+			dest = scheduled_dict[seq]
+
+	#print bcolors.FAIL, "Assigned to ", dest_to_host(dest), bcolors.ENDC
 
 	computing_unit_list.remove(dest)
 	computing_unit_list.append(dest)
+
 	return dest
 
 
 def get_round_robin(execid_list=None, idle=False):
+	#print_purple("=======================================")
+	#traceback.print_stack()
+	#print_purple("=======================================")
+
 	if execid_list == None:
 		execid_list = computing_unit_list
 
@@ -556,6 +605,10 @@ def get_round_robin(execid_list=None, idle=False):
 def register_function(function_package):
 	fp = function_package
 	function_list.append(fp)
+
+	#print_red(function_package.output.info())
+
+	#traceback.print_stack()
 	
 	args = fp.get_args()
 	if fp.execid_list == []:
@@ -564,10 +617,6 @@ def register_function(function_package):
 	for arg in args:
 		
 		flag = register_arg(arg, fp.execid_list)
-		# FREYJA STREAMING
-		#if type(flag)==tuple:
-			#delayed_function_list.append(function_package)
-			#return False
 
 		if VIVALDI_DYNAMIC: 
 			if arg.get_unique_id() != '-1':
@@ -584,6 +633,8 @@ def run_function(dest, function_package):
 	comm.send(rank,                dest=dest,    tag=5)
 	comm.send("run_function",      dest=dest,    tag=5)
 	comm.send(function_package,    dest=dest,    tag=51)
+	#print_purple("Runfunction To %s"%dest)
+	#traceback.print_stack()
 	inform(function_package.output, dest=dest)
 
 # memory management functions
@@ -610,6 +661,9 @@ def inform(data_package, dest=None, count=None):
 	if data_halo not in rc[u][ss][sp]: rc[u][ss][sp][data_halo] = {}
 	if dest not in rc[u][ss][sp][data_halo]:rc[u][ss][sp][data_halo][dest] = 1
 
+	#if data_package.data_source == "local":
+		#rc[u][ss][sp][data_halo][dest] = 0
+
 	
 	data_packages[u][ss][sp] = dp
 
@@ -633,6 +687,7 @@ def register_arg(arg, execid_list = []):
 	elif ss not in rc[u]:flag = 1
 	elif sp not in rc[u][ss]:flag = 1
 	#print "REGISTER ARGS", u, ss, sp, data_halo, flag
+
 	if flag == 1: # data not exist
 		retain(arg)
 		# data_list for make memcpy tasks
@@ -646,6 +701,7 @@ def register_arg(arg, execid_list = []):
 		source_list_dict[str((u,ss,sp,data_halo))] = source_list
 		
 		if VIVALDI_DYNAMIC:
+			#print_red("WRITTEN")
 			data_list.append([arg, execid_list, SP_list, full_copy_range, count])
 		else:
 			make_buffer(arg, execid_list, SP_list=SP_list, full_copy_range=full_copy_range, count=count)
@@ -672,8 +728,11 @@ def register_arg(arg, execid_list = []):
 	source_list_dict[str((u,ss,sp,data_halo))] = source_list
 	
 	if VIVALDI_DYNAMIC:
+		#print_red("WRITTEN")
 		data_list.append([arg, execid_list, SP_list, full_copy_range, count])
+		pass
 	else:
+		#print_blue("SECOND ONNNNNNNNNNNNNNNNNNNNNN===============================")
 		make_buffer(arg, execid_list, SP_list=SP_list, full_copy_range=full_copy_range, count=count)
 	
 	return True
@@ -692,6 +751,7 @@ def notice(data_package, source, source_package=None):
 	if dp.data != None or dp.devptr != None:
 		assert(False)
 
+
 	# check data is initialized
 	def check_init(u,ss,sp):	
 		rc = remaining_write_count_list
@@ -703,6 +763,7 @@ def notice(data_package, source, source_package=None):
 		return False
 	inited = check_init(u,ss,sp)
 
+	#print_blue("from %s, %s %s %s %s"%(source, u, ss, sp, data_halo))
 	#print dp.info(), data_halo, inited
 	if inited == False:
 		inform(dp, dest=source)
@@ -711,9 +772,11 @@ def notice(data_package, source, source_package=None):
 #	print "======================="
 #	print_retain_count()
 	# real work from here
+	#print_purple("%s %s %s"%(u, ss, sp))
+	#print_yellow("%s, %s"%(str(remaining_write_count_list[u][ss][sp]),str(sp)))
+	#print_yellow("%s %s"%(data_halo, data_package.info()))
 	remaining_write_count_list[u][ss][sp][data_halo][source] -= 1
 	counter = remaining_write_count_list[u][ss][sp][data_halo][source]
-#	print "NOT", u, ss, sp, data_halo, source, counter
 	if counter == 0:
 		if u not in valid_list: valid_list[u] = {}
 		if ss not in valid_list[u]: valid_list[u][ss] = {}
@@ -820,6 +883,7 @@ def Free(u,ss,sp,data_halo):
 				for task in memcpy_tasks[du][dss][dsp]:
 					dp = task.dest
 					dh = dp.data_halo
+
 			
 					if target == (du,dss,dsp,dh):
 						memcpy_tasks[du][dss][dsp].remove(task)
@@ -885,6 +949,7 @@ def retain(data_package):
 	if data_halo not in retain_count[u][ss][sp]: retain_count[u][ss][sp][data_halo] = 0
 
 	retain_count[u][ss][sp][data_halo] += 1	
+	#print_red("RETAIN from %d, %s %s %s %s %d"%(source, u, ss, sp, data_halo, retain_count[u][ss][sp][data_halo]))
 	new_delayed = []
 	global delayed_function_list
 	
@@ -896,6 +961,8 @@ def retain(data_package):
 		
 
 def make_a_memcpy_task(source_package, dest_package, dest, work_range, start=None):
+	#print_green("MEM CPY EVENT %s %s"%(str(work_range), dest))
+	#traceback.print_stack()
 	mt = Memcpy_task()
 	# source
 	mt.source = source_package
@@ -911,22 +978,39 @@ def make_a_memcpy_task(source_package, dest_package, dest, work_range, start=Non
 	# work_range
 	mt.work_range = work_range
 
+	if mt.source.data_source in ['hdfs','local']:
+		#print_red("%s DOKIDOKI CHANGE from %d to %d"%(mt.source.get_unique_id(),mt.source.data_halo, mt.dest.data_halo))
+		mt.dest.data_halo = mt.source.data_halo
+
+
 	# dest
 	inform(dest_package, dest=dest)
 	mt.dest = dest_package
 
 	# append to memcpy task list
 	u, ss, sp = mt.source.get_id()
+	#print_green("memcpy_task %s %s %s, %s"%(u, str(ss), str(sp), str(memcpy_tasks)))
 	if dest == 2: 
 		if u not in memcpy_tasks_to_harddisk: memcpy_tasks_to_harddisk[u] = {}
 		if ss not in memcpy_tasks_to_harddisk[u]: memcpy_tasks_to_harddisk[u][ss] = {}
 		if sp not in memcpy_tasks_to_harddisk[u][ss]: memcpy_tasks_to_harddisk[u][ss][sp] = []
 		memcpy_tasks_to_harddisk[u][ss][sp].append(mt)
-	else: 
+	#elif source_package.data_source != 'local':
+	else:
 		if u not in memcpy_tasks: memcpy_tasks[u] = {}
 		if ss not in memcpy_tasks[u]: memcpy_tasks[u][ss] = {}
 		if sp not in memcpy_tasks[u][ss]: memcpy_tasks[u][ss][sp] = []
 		memcpy_tasks[u][ss][sp].append(mt)
+	# test
+	#else:
+		#wr = work_range['z']
+		#diff = wr[1] - wr[0]
+		#if diff != data_halo:
+			#if u not in memcpy_tasks: memcpy_tasks[u] = {}
+			#if ss not in memcpy_tasks[u]: memcpy_tasks[u][ss] = {}
+			#if sp not in memcpy_tasks[u][ss]: memcpy_tasks[u][ss][sp] = []
+			#memcpy_tasks[u][ss][sp].append(mt)
+		#pass
 
 
 def check_SP_exist(u, ss, SP_list):
@@ -1123,7 +1207,7 @@ def select_dest_by_byte_order(bytes_list, u, ss, SP_list, execid_list, data_pack
 
 	# FREYJA STREAMING
 	if max == 0:
-		if data_pack.stream == True:
+		if data_pack.data_source in ['local', 'hdfs']:
 			sp = data_pack.get_split_position()
 			ss = data_pack.get_split_shape()
 			stream_position = eval(sp)['z']-1
@@ -1134,6 +1218,7 @@ def select_dest_by_byte_order(bytes_list, u, ss, SP_list, execid_list, data_pack
 			hdfs_locations = get_hdfs_locations(hdfs_str, ratio_position, computing_unit_dict)
 
 			dest = schedule(hdfs_blk_locations=hdfs_locations, init=True, seq=stream_position)
+			
 
 		else:
 			dest = get_round_robin()
@@ -1191,14 +1276,13 @@ def make_buffer(dp, execid_list, SP_list=None, full_copy_range=None, count=None)
 
 	flag = False
 	source_list = source_list_dict[key]
-	#print "SOURCE LIST", source_list
+	
 
 	for source in source_list:
 		# check source is available now
 		available = check_source_is_available(source)
 		# if not return False
 		if not available: 
-			#print "source is not available"
 			return False
 	SS = source_list[0][1]
 	
@@ -1215,12 +1299,16 @@ def make_buffer(dp, execid_list, SP_list=None, full_copy_range=None, count=None)
 	dest = select_dest_by_byte_order(bytes_list, u, SS, SP_list, execid_list, data_pack=dp)
 
 	if dest == -1:
-		#print "DEST selection failed", dest
+		#print_red( "DEST selection failed %s"%dest)
 		#print bytes_list, u, SS, SP_list, execid_list
 		return False
+
 	
 	
+	#print_yellow("HEYHYE %s"%str(source_list))
 	for source in source_list:
+		#print_green(source)
+		#print_green(dest)
 		su = source[0]
 		sss = source[1]
 		ssp = source[2]
@@ -1230,8 +1318,8 @@ def make_buffer(dp, execid_list, SP_list=None, full_copy_range=None, count=None)
 		valid_range = get_valid_range(sdp.full_data_range, sdp.split_shape, sdp.split_position) # this range is always valid
 		work_range = clip_range(valid_range, full_copy_range)
 		dest_package = dp.copy()
-	#	print "SOURCE", sdp
-	#	print "DEST", dest_package, work_range
+		#print_yellow("HOIHOI %s"%str((u, ss, sp, sdp.data_halo)))
+
 		make_a_memcpy_task(sdp, dest_package, dest, work_range)
 
 	inform(dp, dest=dest)
@@ -1675,7 +1763,7 @@ while flag != "finish":
 		time.sleep(0.001)
 	source = comm.recv(source=MPI.ANY_SOURCE,    tag=5)
 	flag = comm.recv(source=source,              tag=5)
-	#print "From Vivaldi_memory_manager by %d: %s"%(source, flag)
+	#print_blue("From Vivaldi_memory_manager by %d: %s"%(source, flag))
 	if log_type != False: print "Scheduler source:", source, "flag:", flag
 	
 	# interactive mode functions
@@ -1733,6 +1821,7 @@ while flag != "finish":
 			remove_data()
 	# function initialization	
 	if flag == "function":
+		#print_red("FROM %d"%source)
 		function_package = comm.recv(source=source, tag=52)
 		flag = init_function(function_package)
 		if not flag:
@@ -1933,8 +2022,9 @@ while flag != "finish":
 		disconnect()
 	elif flag == "notice":
 		st = time.time()
+		target 			= comm.recv(source=source, tag=5)
 		data_package    = comm.recv(source=source, tag=51)
-		notice(data_package, source)
+		notice(data_package, target)
 		flag_times[flag] += time.time()-st
 	elif flag == "inform":
 #		st = time.time()
@@ -2042,6 +2132,7 @@ while flag != "finish":
 		dp = data_package
 		u = dp.get_unique_id()
 		buffer_halo = dp.buffer_halo
+
 
 		dp.split_shape = str(SPLIT_BASE)
 		dp.split_position = str(SPLIT_BASE)

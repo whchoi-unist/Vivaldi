@@ -6,6 +6,9 @@ from Vivaldi_misc import *
 from Vivaldi_install_check import *
 import Vivaldi_dsl_functions
 
+import traceback
+import getpass
+
 # interactive_mode functions
 def log(log_type):
 	dest = 1
@@ -87,6 +90,14 @@ def scheduler_update_computing_unit(cud):
 	comm.send(rank,					   dest=dest,	 tag=tag)
 	comm.send("update_computing_unit",	   dest=dest,	 tag=tag)
 	comm.send(cud,						   dest=dest,	 tag=tag)
+
+def notify_reader_to_computing_unit(cud, dll):
+	tag = 5
+	for dest in cud.keys():
+		comm.send(rank,					   dest=dest,	 tag=tag)
+		comm.send("update_data_loader",	   dest=dest,	 tag=tag)
+		comm.send(dll,					   dest=dest,	 tag=61)
+
 def set_device(host, num, type):
 	# prepare spawn		####################################################################
 	info = MPI.Info.Create()
@@ -195,7 +206,8 @@ def spawn_all():
 		
 		return COMMAND, ARGS, MAXPROCS, INFO
 	def add_GPU(COMMAND, ARGS, MAXPROCS, INFO, hostfile):
-		device_type = 'GPU'
+		device_type = 'GPU'	
+		global i
 		i = 3
 		for host in device_info:
 			if device_type not in device_info[host]:continue
@@ -212,6 +224,22 @@ def spawn_all():
 			i = i + device_info[host][device_type]
 			
 		return COMMAND, ARGS, MAXPROCS, INFO
+
+	def add_data_manager(COMMAND, ARGS, MAXPROCS, INFO, hostfile):
+		global i
+		for host in device_info:
+			filename = 'Vivaldi_data_loader.py'
+			unit = os.path.abspath(os.path.join(os.path.dirname(__file__), filename))
+			info = MPI.Info.Create()
+			info.Set("host", host)
+			COMMAND += [sys.executable]
+			ARGS += [[unit]]
+			MAXPROCS += [1]
+			INFO += [info]
+			i = i + 1
+
+		return COMMAND, ARGS, MAXPROCS, INFO
+
 	def set_computing_unit_list():
 		# computing unit start from 3
 		# 0: main
@@ -223,6 +251,13 @@ def spawn_all():
 				for execid in range(device_info[host][device_type]):
 					computing_unit_list[rank] = {'host':host,'device_type':device_type}
 					rank = rank + 1	
+
+		return rank
+
+	def set_data_loader_list(rank):
+		for host in device_info:
+			data_loader_list[rank] = {'host':host}
+			rank = rank + 1	
 		
 	hostfile = read_hostfile()
 	set_device_info(hostfile)
@@ -230,14 +265,18 @@ def spawn_all():
 	COMMAND, ARGS, MAXPROCS, INFO = add_reader(COMMAND, ARGS, MAXPROCS, INFO)
 	COMMAND, ARGS, MAXPROCS, INFO = add_CPU(COMMAND, ARGS, MAXPROCS, INFO, hostfile)
 	COMMAND, ARGS, MAXPROCS, INFO = add_GPU(COMMAND, ARGS, MAXPROCS, INFO, hostfile)
+	COMMAND, ARGS, MAXPROCS, INFO = add_data_manager(COMMAND, ARGS, MAXPROCS, INFO, hostfile)
 	
 	new_comm = MPI.COMM_SELF.Spawn_multiple(
 			COMMAND, ARGS, MAXPROCS,
 			info=INFO, root=0)
 	global comm
 	comm = new_comm.Merge()
-	set_computing_unit_list()
+
+	rank = set_computing_unit_list()
+	set_data_loader_list(rank)
 	scheduler_update_computing_unit(computing_unit_list)
+	notify_reader_to_computing_unit(computing_unit_list, data_loader_list)
 	
 def get_GPU_list(num=-1, type=None):
 	# check
@@ -506,6 +545,7 @@ def scheduler_retain(data_package):
 	comm.send(rank,				dest=1,		tag=5)
 	comm.send("retain",			dest=1,		tag=5)
 	send_data_package(data_package, dest=1,		tag=58)
+
 def scheduler_inform(data_package, execid=None):
 	dp = data_package
 	global rank
@@ -557,6 +597,7 @@ def Vivaldi_Gather(data_package):
 	dp.data = temp1
 	dp.devptr = temp2
 
+
 	def recv():
 		data_package = comm.recv(source=source,	 tag=52)
 		dp = data_package
@@ -572,20 +613,59 @@ def Vivaldi_Gather(data_package):
 	#FREYJA STREAMING
 	# wati until data created, we don't know where the data will come from
 	#if not dp.stream:
-	if True:
-		source = comm.recv(source=MPI.ANY_SOURCE,	 tag=5)
-		flag = comm.recv(source=source,				 tag=5)
+	print_green("GATHER IS CALLED")
+	#print_blue(dp.info())
+	source = comm.recv(source=MPI.ANY_SOURCE,	 tag=5)
+	flag = comm.recv(source=source,				 tag=5)
+
+	print_red("FLAG : %s , FROM : %s"%(flag, source))
+
+	if flag == 'memcpy_p2p_recv':
 		task = comm.recv(source=source,				 tag=57)
 		halo_size = comm.recv(source=source,		 tag=57)
 		data, data_package = recv()
+
+	elif flag == "vivaldi_local":
+		total_recv_cnt = comm.recv(source=source,		tag=5)
+		
+		data_cnt = dp.get_unique_id()
+
+		file_format = "/scratch/%s/VIVALDI/VIVALDI%s_%s"
+
+		for elem in range(total_recv_cnt):
+			file_path = file_format%(getpass.getuser(), data_cnt, elem)
+			for dest in data_loader_list:
+				comm.send(rank,			dest=dest,	tag=5)
+				comm.send("data_check",	dest=dest,	tag=5)
+				comm.send(file_path,	dest=dest,	tag=55)
+			
+				existance = comm.recv(source=dest, 	tag=11)
+
+				if existance:
+					comm.send(rank,					dest=dest,	tag=5)
+					comm.send("upload_to_hdfs",		dest=dest,	tag=5)
+					comm.send(file_path,			dest=dest,	tag=55)
+					comm.send("VIVALDI_RESULT.raw",	dest=dest,	tag=55)
+
+					reply = comm.recv(source=dest, tag=11)
+					break
+
+		print_purple("CATCHED %d"%total_recv_cnt)
+		data = dp
+		
 
 	#else:
 		#for elem in range(dp.stream_count):
 			#source = comm.recv(source=MPI.ANY_SOURCE, tag=25)
 
+	#import random
+	#open("/home/freyja/result/INPUT%d.raw"%int(random.random()*100),"wb").write(data.tostring())
 		#data = "FINISH"
+	#print_purple("MAIN DONE")
+	#print_purple(data.shape)
 
 
+	print_green("GATHER IS DONE")
 	return data
 
 def get_file_name(file_name=''):
@@ -798,6 +878,7 @@ def register_function_package(function_package):
 	comm.send(0,					dest=dest,	  tag=5)
 	comm.send("function",			dest=dest,	  tag=5)
 	comm.send(function_package,	dest=dest,	  tag=52)
+	#traceback.print_stack()
 	def recover_data(temp_list):
 		i = 0
 		argument_package_list = function_package.get_args()
@@ -880,7 +961,7 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 	share_argument_package_list(argument_package_list)
 
 	# get return package
-	def get_return_package(function_name, argument_package_list, work_range, output_halo):
+	def get_return_package(function_name, argument_package_list, work_range, output_halo, merge_func=''):
 		data_package = Data_package()
 		def get_unique_id():
 			global unique_id
@@ -897,7 +978,7 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 			return_dtype = get_return_dtype(function_name, argument_package_list, function_code)
 			for elem in argument_package_list:
 				if isinstance(elem, Data_package):
-					if elem.stream and type(work_range) != dict:
+					if elem.data_source in ["hdfs", "local"] and merge_func == '':
 						return elem.data_contents_dtype
 			if return_dtype.endswith('_volume'):
 				print "Vivaldi_warning"
@@ -907,6 +988,16 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 				print "return_dtype: ", return_dtype
 				print "---------------------------------"
 			return return_dtype
+
+		def get_return_source(argument_package_list):
+			return_source = None
+			
+			for elem in argument_package_list:
+				if elem.data_source in ["hdfs", "local"]  and merge_func== '':
+					return_source = "local"
+			
+			return return_source
+					
 		return_dtype = get_return_dtype(function_name, argument_package_list)
 
 
@@ -916,8 +1007,12 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 		data_package.halo = output_halo
 		data_package.split = output_split
 		data_package.shared = True
+
+		# FREYJA STREAMING
+		data_package.set_data_source(get_return_source(argument_package_list))
 		return data_package
-	return_package = get_return_package(function_name, argument_package_list, work_range, output_halo)
+
+	return_package = get_return_package(function_name, argument_package_list, work_range, output_halo, merge_func)
 	
 	# register return package to data_package_list
 	def register_return_package(key, return_package):
@@ -1086,6 +1181,8 @@ def parallel(function_name='', argument_package_list=[], work_range={}, execid=[
 	#FREYJA STREAMING
 	return_package.stream = function_package.stream
 	return_package.stream_count = function_package.stream_count
+
+
 	scheduler_retain(return_package)
 	return return_package
 
@@ -1108,7 +1205,9 @@ def run_function(return_name=None, func_name='', execid=[], work_range=None, arg
 
 				#FREYJA STREAMING
 				if isinstance(arg, Data_package):
-					if isinstance(work_range, Data_package):
+					if split_dict != {}:
+						pass
+					elif isinstance(work_range, Data_package):
 						if arg.stream and (arg.data_shape == work_range.data_shape):
 							split = {'z':arg.stream_count}
 							split_dict[data_name] = split
@@ -1255,6 +1354,7 @@ except:
 	# spawn child
 	device_info = {} # host, device_type
 	computing_unit_list = {} # mapping rank and process
+	data_loader_list    = {}
 				
 	# task functions
 	# data_package_list have to type of id. 

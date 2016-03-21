@@ -803,6 +803,8 @@ def find_memory_access_with_exception(line, object_list, level):
 		# exception handling
 		#if elem in ['save_image','save_data','run_function']:
 			#return False, ''
+		if elem in ['run_function']:
+			return False, ''
 		
 		# recursive when parenthesis case
 		if len(elem) > 2 and elem[0] in ['[','(','{']:
