@@ -678,6 +678,10 @@ def get_file_name(file_name=''):
 		extension = 'png'
 		return file_name + '.' + extension
 	return file_name, extension.lower()
+def save_hdfs(file_name=None):
+	pass
+
+
 def save_image_2d(file_name=None, extension='png', buf=None, chan=None):
 	if log_type in ['time','all']:
 		st = time.time()
