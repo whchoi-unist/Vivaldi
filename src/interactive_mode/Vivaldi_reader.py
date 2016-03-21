@@ -39,10 +39,11 @@ def idle():
 	comm.send(rank,        dest=1,	   tag=5)
 	comm.send("idle",      dest=1,	   tag=5)
 
-def notice(data_package):
+def notice(data_package, target=rank):
 	rank = comm.Get_rank()
 	comm.send(rank,        dest=1,    tag=5)
 	comm.send("notice",    dest=1,    tag=5)
+	comm.send(target,    dest=1,    tag=5)
 
 	data = data_package.data
 	devptr = data_package.devptr
@@ -72,9 +73,11 @@ def send(data, data_package, dest=None, gpu_direct=False):
 				request = comm.send(blk, dest=dest, tag=57+elem)
 				begin += transfer_unit
 		else:
-			request = comm.Isend(data, dest=dest, tag=57)
+			#request = comm.Isend(data, dest=dest, tag=57)
+			request = comm.send(data, dest=dest, tag=57)
 	else:
-		request = comm.Isend("STREAM", dest=dest, tag=57)
+		#request = comm.Isend("STREAM", dest=dest, tag=57)
+		request = comm.send("STREAM", dest=dest, tag=57)
 
 	if VIVALDI_BLOCKING: MPI.Request.Wait(request)
 	else: requests.append((request, data))
@@ -110,6 +113,8 @@ def save_data(data, data_package):
 	dp = data_package
 	dp.data = data
 	dp.memory_type = 'memory'
+
+	#open("/home/freyja/result/INPUT.raw","wb").write(data.tostring())
 
 	if data != None:
 		notice(dp)
@@ -243,7 +248,7 @@ def data_finder(u, ss, sp, gpu_direct=False, data_range=None):
 
 	cut = False
 	if data_range != None and data_range != source_package.data_range: cut = True
-# FREYJA STREAMING
+	# FREYJA STREAMING
 	stream = source_package.stream
 
 	out_of_core = source_package.out_of_core
@@ -266,7 +271,9 @@ def data_finder(u, ss, sp, gpu_direct=False, data_range=None):
 					cmd += '%d:%d,'%(data_range[axis][0], data_range[axis][1])
 			cmd = 'data = numpy.array(data'+cmd[:-1]+'])'
 
+			
 			exec cmd
+			
 			data_halo = 0
 		else:
 			data = source_package.data
@@ -427,6 +434,7 @@ while flag != "finish":
 		save_data(data, dp)
 #		mem_retain(dp)
 		idle()
+		#open("/home/freyja/result/INPUT.raw","wb").write(data.tostring())
 		flag_times[flag] += time.time() - st
 	elif flag == "send_order":
 		st = time.time()
