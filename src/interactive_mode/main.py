@@ -9,6 +9,12 @@ import Vivaldi_dsl_functions
 import traceback
 import getpass
 
+
+
+#global variables
+HDFS_file_cnt = 0
+HDFS_data_cnt = None
+
 # interactive_mode functions
 def log(log_type):
 	dest = 1
@@ -618,41 +624,25 @@ def Vivaldi_Gather(data_package):
 	source = comm.recv(source=MPI.ANY_SOURCE,	 tag=5)
 	flag = comm.recv(source=source,				 tag=5)
 
-	print_red("FLAG : %s , FROM : %s"%(flag, source))
 
 	if flag == 'memcpy_p2p_recv':
 		task = comm.recv(source=source,				 tag=57)
 		halo_size = comm.recv(source=source,		 tag=57)
 		data, data_package = recv()
 
-	elif flag == "vivaldi_local":
-		total_recv_cnt = comm.recv(source=source,		tag=5)
+	elif flag == "vivaldi_local":	
+		global HDFS_file_cnt, HDFS_data_cnt
+		HDFS_file_cnt = comm.recv(source=source,		tag=5)
 		
-		data_cnt = dp.get_unique_id()
-
-		file_format = "/scratch/%s/VIVALDI/VIVALDI%s_%s"
-
-		for elem in range(total_recv_cnt):
-			file_path = file_format%(getpass.getuser(), data_cnt, elem)
-			for dest in data_loader_list:
-				comm.send(rank,			dest=dest,	tag=5)
-				comm.send("data_check",	dest=dest,	tag=5)
-				comm.send(file_path,	dest=dest,	tag=55)
-			
-				existance = comm.recv(source=dest, 	tag=11)
-
-				if existance:
-					comm.send(rank,					dest=dest,	tag=5)
-					comm.send("upload_to_hdfs",		dest=dest,	tag=5)
-					comm.send(file_path,			dest=dest,	tag=55)
-					comm.send("VIVALDI_RESULT.raw",	dest=dest,	tag=55)
-
-					reply = comm.recv(source=dest, tag=11)
-					break
-
-		print_purple("CATCHED %d"%total_recv_cnt)
+		HDFS_data_cnt = dp.get_unique_id()
 		data = dp
-		
+
+		for elem in range(HDFS_file_cnt-1):
+			source = comm.recv(source=MPI.ANY_SOURCE,	 tag=5)
+			_ = comm.recv(source=source,				 tag=5)
+			if _ == "memcpy_p2p_recv":
+				break
+			_ = comm.recv(source=source,				tag=5)
 
 	#else:
 		#for elem in range(dp.stream_count):
@@ -678,8 +668,36 @@ def get_file_name(file_name=''):
 		extension = 'png'
 		return file_name + '.' + extension
 	return file_name, extension.lower()
-def save_hdfs(file_name=None):
-	pass
+def save_hdfs(data_package, file_name=None):
+	global HDFS_data_cnt, HDFS_file_cnt
+	if file_name == None:
+		file_name = "VIVALDI_RESULT.raw"
+
+	file_format = "/scratch/%s/VIVALDI/VIVALDI%s_%s"
+	start_time = time.time()
+
+
+	for elem in range(HDFS_file_cnt):
+		file_path = file_format%(getpass.getuser(), HDFS_data_cnt, elem)
+		for dest in data_loader_list:
+			comm.send(rank,			dest=dest,	tag=5)
+			comm.send("data_check",	dest=dest,	tag=5)
+			comm.send(file_path,	dest=dest,	tag=55)
+			
+			existance = comm.recv(source=dest, 	tag=11)
+
+			if existance:
+				comm.send(rank,					dest=dest,	tag=5)
+				comm.send("upload_to_hdfs",		dest=dest,	tag=5)
+				comm.send(file_path,			dest=dest,	tag=55)
+				comm.send(file_name,			dest=dest,	tag=55)
+
+				reply = comm.recv(source=dest, tag=11)
+				break
+
+	#print_purple(" ** It tooks %.0f seconds to upload to hdfs "%(time.time()-start_time))
+
+	return
 
 
 def save_image_2d(file_name=None, extension='png', buf=None, chan=None):
@@ -1500,6 +1518,9 @@ def Vivaldi_input_argument_parsing(argument_list):
 	
 import sys
 Vivaldi_input_argument_parsing(sys.argv)
+
+MPI.Finalize()
+exit()
 
 #log_on()
 # interactive mode functions

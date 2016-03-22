@@ -243,7 +243,7 @@ def load_from_hdfs(data_package, hdfs_addr, hdfs_path):
 		
 			diff = aft - bef
 		
-			print "DATA LOADING ENDS from %s -- time elapsed = %.03f (sec) , reading speed = %.03f MB/sec"%(socket.gethostname(), diff, len(buf) / diff * (1024 ** -2))
+			print_bold( "DATA LOADING ENDS from %s -- time elapsed = %.03f (sec) , reading speed = %.03f MB/sec"%(socket.gethostname(), diff, len(buf) / diff * (1024 ** -2)))
 			data = numpy.fromstring(buf, dtype=file_python_dtype).reshape(ds_seq)
 
 			break

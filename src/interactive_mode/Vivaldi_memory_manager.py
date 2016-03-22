@@ -52,7 +52,8 @@ synchronize_flag = False
 
 VIVALDI_BLOCKING = False
 VIVALDI_SCHEDULE = False
-VIVALDI_DYNAMIC = True
+VIVALDI_DYNAMIC  = True
+VIVALDI_LOCALITY = True
 
 log_type = False
 
@@ -375,13 +376,14 @@ def temp_func2(source_list=None): # dynamic function execution
 					del reserved_dict[fp.dest]
 	
 			stream_catch = False
-			if True:
+			if VIVALDI_LOCALITY:
 				fn_args = fp.function_args
 				for elem in fn_args:
 					if elem.data_source in ['hdfs']:
 						sp = elem.get_split_position()
 						ss = elem.get_split_shape()
 						stream_position = eval(sp)['z']-1
+						max_splits      = eval(ss)['z'] / len(computing_unit_list)
 	
 						ratio_position = stream_position / float(eval(ss)['z'])
 
@@ -393,6 +395,7 @@ def temp_func2(source_list=None): # dynamic function execution
 						sp = elem.get_split_position()
 						ss = elem.get_split_shape()
 						stream_position = eval(sp)['z']-1
+						max_splits      = eval(ss)['z'] / len(computing_unit_list)
 						hdfs_locations = {}
 						stream_catch = True
 						print
@@ -409,7 +412,7 @@ def temp_func2(source_list=None): # dynamic function execution
 				if stream_catch is False:
 					dest = get_round_robin(il)
 				else:
-					dest = schedule(il, hdfs_blk_locations=hdfs_locations, seq=stream_position)
+					dest = schedule(il, hdfs_blk_locations=hdfs_locations, seq=stream_position, max_per_worker=max_splits)
 				run_function(dest, fp)
 				function_list.remove(fp)
 				idle_list.remove(dest)
@@ -430,8 +433,7 @@ def temp_func3():
 		dp = data_package
 
 		flag = make_buffer(dp, execid_list)
-		if flag:
-			data_list.remove(elem)
+		if flag: data_list.remove(elem)
 
 
 def temp_func4(source_list=None): # function execution
@@ -526,7 +528,9 @@ def launch_task(source_list=None):
 
 
 
-def schedule(execid_list=None, idle=False, hdfs_blk_locations={}, init=False, seq = -1):
+def schedule(execid_list=None, idle=False, hdfs_blk_locations={}, init=False, seq = -1, max_per_worker=float('inf')):
+	if max_per_worker == 0:
+		max_per_worker = float('inf')
 	#if execid_list == None:
 	execid_list = computing_unit_list
 
@@ -546,12 +550,30 @@ def schedule(execid_list=None, idle=False, hdfs_blk_locations={}, init=False, se
 	else:
 		cur_list = [elem for elem in computing_unit_list if elem in execid_list]
 
+	# HDFS locality 
+	found = False
 	for source in cur_list:
 		if idle and source not in idle_list:continue
 		val = task_allocation_dict[dest_to_host(source)]
-		if min > val:
+		if min > val and val < max_per_worker:
+			found = True
 			dest = source
 			min = val
+
+	# HDFS load balancing
+	if found == False:
+		#print_red("LOAD BALANCING %d"%max_per_worker)
+		#print_red(task_allocation_dict)
+		cur_list = [elem for elem in computing_unit_list if elem in execid_list]
+
+		for source in cur_list:
+			if idle and source not in idle_list:continue
+			val = task_allocation_dict[dest_to_host(source)]
+			if min > val and val <= max_per_worker:
+				found = True
+				dest = source
+				min = val
+
 
 
 	#print "DEST", dest, type(dest), cur_list
@@ -930,13 +952,14 @@ def release(data_package):
 	
 	try:
 		retain_count[u][ss][sp][data_halo] -= 1
+		if retain_count[u][ss][sp][data_halo] == 0:
+			Free(u,ss,sp,data_halo)
 	except:
-		print "UU", u, ss, sp, data_halo
-		print retain_count
-		assert(False)
+		#print "UU", u, ss, sp, data_halo
+		#print retain_count
+		#assert(False)
+		pass
 	
-	if retain_count[u][ss][sp][data_halo] == 0:
-		Free(u,ss,sp,data_halo)
 def retain(data_package):
 	dp = data_package
 
@@ -1207,17 +1230,19 @@ def select_dest_by_byte_order(bytes_list, u, ss, SP_list, execid_list, data_pack
 
 	# FREYJA STREAMING
 	if max == 0:
-		if data_pack.data_source in ['local', 'hdfs']:
+		#if data_pack.data_source in ['local', 'hdfs']:
+		if VIVALDI_LOCALITY:
 			sp = data_pack.get_split_position()
 			ss = data_pack.get_split_shape()
 			stream_position = eval(sp)['z']-1
+			max_splits      = eval(ss)['z'] / len(computing_unit_list)
 
 			ratio_position = stream_position / float(eval(ss)['z'])
 
 			hdfs_str  = data_pack.stream_hdfs_file_name
 			hdfs_locations = get_hdfs_locations(hdfs_str, ratio_position, computing_unit_dict)
 
-			dest = schedule(hdfs_blk_locations=hdfs_locations, init=True, seq=stream_position)
+			dest = schedule(hdfs_blk_locations=hdfs_locations, init=True, seq=stream_position,max_per_worker=max_splits)
 			
 
 		else:

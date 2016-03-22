@@ -18,6 +18,7 @@ from numpy.random import rand
 from Vivaldi_memory_packages import Data_package
 import traceback
 import socket
+import time
 from hdfs import InsecureClient
 
 import os, sys
@@ -373,8 +374,20 @@ def wait_data_arrive(data_package, stream=None):
 				if data_exist and is_new_data == False:
 					# data already existed and keep using same data
 					continue
+
+			# data load from HDFS
 			if elem['data_package'].data_source == 'hdfs':
 				t_dp = elem['data_package']
+				tu, tss, tsp = t_dp.get_id()
+
+
+				
+				#if tu in data_list:
+					#if tss in data_list[tu]:
+						#if tsp in data_list[tu][tss]:
+							#continue
+
+
 				sp = t_dp.get_split_position()
 				stream_position = eval(sp)['z']-1
 				hdfs_str  = t_dp.stream_hdfs_file_name
@@ -419,13 +432,22 @@ def wait_data_arrive(data_package, stream=None):
 					comm.send("vivaldi_local",		dest=dest,		tag=5)
 					comm.send(total_cnt,			dest=dest,		tag=5)
 
+					return
 
 				else:
 					#print_green("MIDDLE")
+					print_stream = ''
+					
+					import time
+					start_time = time.time()
 					center_data = load_data_from_local(t_dp, data_path)
+					end_time = time.time()
+					print_stream +=  "Load center data (local HDD) : %.03f (Bandwidth : %.03f MB/s)\n"%(end_time-start_time, center_data.nbytes/(end_time-start_time)/(1024.0**2))
 	
 	
+					h_start_time = time.time()
 					if t_dp.data_halo != 0:
+						ori_bytes = center_data.nbytes
 						curr_cnt = int(data_path[data_path.rfind('_')+1:])
 						
 						# upper
@@ -453,6 +475,10 @@ def wait_data_arrive(data_package, stream=None):
 							lower_data = halo_data_load(t_dp, delem, file_path, "start")
 							center_data = numpy.concatenate((center_data, lower_data), axis=0)
 
+						h_end_time = time.time()
+						print_stream += " Load halo (neighbor local HDD) : %.03f (Bandwidth : %.03f MB/s)\n"%(h_end_time-h_start_time, (center_data.nbytes-ori_bytes)/(h_end_time-h_start_time)/(1024.0**2))
+
+					#print_purple(print_stream)
 	
 				#print_blue(dest_package.info())
 				#print_red("%s, %s, %s"%(str(center_data.shape),str(center_data.dtype),curr_cnt))
@@ -690,6 +716,7 @@ def recv():
 
 
 def save_as_local(data_package, dest_devptr):
+	start_time = time.time()
 	dp = data_package
 	devptr = dest_devptr
 	local_data_shape = dp.data_shape
@@ -705,9 +732,12 @@ def save_as_local(data_package, dest_devptr):
 	file_name = "VIVALDI%s_%d"%(dp.get_unique_id(),eval(dp.get_split_position())['z']-1)
 	f = open(path+file_name, "wb")
 
-	f.write(buf.tostring())
+	buf_str = buf.tostring()
+	f.write(buf_str)
 
 	dp.data_local_path = path + file_name
+
+	#print_purple("Save on Local HDD %.04f seconds (Bandwidth :  %.02f MB/s )."%(time.time() - start_time, len(buf_str)/(time.time() - start_time)/(1024.0**2)))
 
 
 
@@ -1512,17 +1542,27 @@ def gpu_mem_check_and_free():
 	
 	#print "From %s, %s"%(socket.gethostname(),str(devptr_and_timestamp))
 	#print u, ss, sp
+	catched = False
 	for _elem in devptr_and_timestamp:
 		_updated   = _elem['updated']
 		if _updated == False:
+			catched = True
 			_timestamp = _elem['timestamp']
 			if _timestamp < smallest:
 				_devptr    = _elem['devptr']
-				_devptr.free()
+				target = _elem
+				smallest = _timestamp
 
-				devptr_and_timestamp.remove(_elem)
-				return True
 
+	if catched:
+		#print_bold("freed")
+		devptr_and_timestamp.remove(target)
+		target['devptr'].free()
+
+		return True
+
+	print_bold("NOTHING TO DO FREE GPU MEM %s"%socket.gethostname())
+	print_bold(devptr_and_timestamp)
 	return False
 
 def update_devptr_timestamp(devptr):
@@ -1637,7 +1677,8 @@ def malloc_with_swap_out(bytes, arg_lock=[], debug_trace=False):
 #		print gpu_list
 		return devptr, bytes
 	else:
-		print data_pool
+		pass
+		#print data_pool
 
 	print "We don't have enough memory"
 	assert(False)
@@ -1833,6 +1874,8 @@ def run_function(function_package, function_name):
 			full_output_range = dp.full_data_range
 			buffer_range = dp.buffer_range
 			buffer_halo = dp.buffer_halo
+
+			#update_devptr_timestamp(devptr)
 			
 			ad = data_range_to_cuda_in(output_range, full_output_range, buffer_range, buffer_halo=buffer_halo, stream=stream)
 			cuda_args += [ad]
@@ -1857,6 +1900,7 @@ def run_function(function_package, function_name):
 			output_package = func_output
 			output_package.set_usage(usage)
 			
+			#update_devptr_timestamp(devptr)
 			if False:
 				print "OUTPUT"
 				print "OUTPUT_RANGE", data_range
@@ -1964,10 +2008,10 @@ def run_function(function_package, function_name):
 		u, ss, sp = func_output.get_id()
 		target = (u,ss,sp)
 
-		result_buffer = numpy.ndarray((1024,1024,4),dtype=numpy.uint8)
-		cuda.memcpy_dtoh(result_buffer, cuda_args[0])
-		import Image
-		Image.fromarray(result_buffer[:,:,:3]).save("/home/freyja/result/%s.png"%(socket.gethostname()))
+		#result_buffer = numpy.ndarray((1024,1024,4),dtype=numpy.uint8)
+		#cuda.memcpy_dtoh(result_buffer, cuda_args[0])
+		#import Image
+		#Image.fromarray(result_buffer[:,:,:3]).save("/home/freyja/result/%s.png"%(socket.gethostname()))
 	
 	
 		Event_dict[target] = kernel_finish
@@ -2265,6 +2309,8 @@ while flag != "finish":
 	elif flag == "run_function":
 		function_package = comm.recv(source=source, tag=51)
 
+		import time
+		rf_start_time = time.time()
 		try:
 			# get kernel function name
 			def get_kernel_function_name(function_package):
@@ -2287,9 +2333,10 @@ while flag != "finish":
 					function_and_kernel_mapping[function_name].append(kernel_function_name)
 
 			# update dirty flag for devptr
-			for elem in function_package.function_args:
-				if elem.devptr != None:
-					update_devptr_timestamp(devptr)
+			#for elem in function_package.function_args:
+				#print_bold( elem.data_source)
+				#if elem.devptr != None:
+					#update_devptr_timestamp(devptr)
 					
 					
 			devptr, output_package = run_function(function_package, kernel_function_name)
@@ -2303,11 +2350,12 @@ while flag != "finish":
 				#print "HOI"
 				pass
 		except:
-			print "DAMN, %s"%socket.gethostname()
+			#print "DAMN, %s"%socket.gethostname()
 			exc_type, exc_value, exc_traceback = sys.exc_info()
 			a = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
 			print a
 		idle()
+		#print_yellow("Run_function cost : %.03f"%(time.time()-rf_start_time))
 	elif flag == "update_data_loader":
 		data_loader_list = comm.recv(source=source, tag=61)
 		#print_red(data_loader_list)
