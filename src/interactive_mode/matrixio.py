@@ -250,7 +250,7 @@ def read_2d_data(f):
     if f.endswith('.mat'): return read_matlab(f)
     if f.endswith('.mtx'): return read_mtx(f)
     if f.endswith('.npz') or f.endswith('.npy'): return read_numpy(f)
-    if any([f.endswith(e) for e in ['.png', '.PNG', '.jpg', '.JPG', '.jpeg', '.JPEG', '.bmp', '.BMP', '.PGM']]):
+    if any([f.endswith(e) for e in ['.png', '.PNG', '.jpg', '.JPG', '.jpeg', '.JPEG', '.bmp', '.BMP', '.PGM', '.tif', '.TIF']]):
 		img = Image.open(f)
 		tmp = numpy.asarray(img)
 		return tmp
