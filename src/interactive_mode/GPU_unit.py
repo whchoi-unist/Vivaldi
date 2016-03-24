@@ -37,247 +37,6 @@ def disconnect():
 # MPI Communication
 #def wait_data_arrive(data_package, stream=None, vivaldi_stream=False):
 # FREYJA STREAMING
-def wait_data_arrive_streaming(data_package, streaming_cnt, stream=None, gmem_set=False):
-	# local_functions
-	#################################################################
-	def prepare_dest_package_and_dest_devptr(is_new_data, dest_package):
-		# ???????????????????
-		output_package = dest_package.copy()
-		if is_new_data:
-			# create new data
-			# because we don't have cuda memory allocation for dest_package
-			dest_devptr, new_usage = malloc_with_swap_out(output_package.data_bytes)
-			output_package.set_usage(new_usage)
-			
-			#cuda.memset_d8(dest_devptr, 0, output_package.data_bytes)
-		else:
-			# we already have cuda memory allocation
-			# if there are enough halo, we can use exist buffer instead dest_package
-			# if there are not enough halo, we have to allocate new buffer
-			
-			is_new_data_halo = task.dest.data_halo
-			exist_data_halo = data_list[u][ss][sp].data_halo
-			
-			if is_new_data_halo <= exist_data_halo: 
-				output_package = data_list[u][ss][sp]
-			else:
-				output_package = dest_package
-			dest_devptr = data_list[u][ss][sp].devptr
-
-		return output_package, dest_devptr
-	def check_new_data(data_exist, dest_devptr):
-		is_new_data = False
-		if not data_exist: # data is not exist
-			is_new_data = True
-		else:
-			# buffer not exist
-			if dest_devptr == None: 
-				is_new_data = True
-		return is_new_data
-
-	# data : input data
-	# data_package : Data_package to be written
-	# ori_split_position : original data split position
-	def split_data_in_cpu(data, data_package, ori_split_position):
-		data_range = data_package.data_range
-		streaming_unit = data_package.disk_file_size#/data_package.disk_block_size
-		if type(ori_split_position) == str:
-			ori_split_position = eval(ori_split_position)
-		data_halo = data_package.data_halo
-		copy_str = 'data['
-		for axis in ['z','y','x']:
-			cur_range = data_range[axis]
-			cur_start = int(ori_split_position[axis])-1
-			if cur_start == 0:
-				start = cur_range[0]-cur_start*streaming_unit
-				end   = cur_range[1]-cur_start*streaming_unit
-			else:
-				start = cur_range[0]-cur_start*streaming_unit + data_halo
-				end   = cur_range[1]-cur_start*streaming_unit + data_halo
-			copy_str += '%s:%s,'%(str(start), str(end))
-		copy_str = copy_str[:-1]+ ']'
-		ret_data = eval(copy_str)
-		return eval(copy_str)
-		
-	
-	# initialize variables
-	#################################################################
-	u, ss, sp = data_package.get_id()
-	
-	# check recv_list
-	flag = True
-	if u not in recv_list: flag = False
-	elif ss not in recv_list[u]: flag = False
-	elif sp not in recv_list[u][ss]: flag = False
-
-	# implementation
-	#####################################################################
-
-	if flag:
-		# initialize variable
-		# prepare copy
-		# make dest data
-		first = recv_list[u][ss][sp][0]
-		dest_package = first['task'].source
-
-		if dest_package.devptr == None:
-			#if data_package.data_halo == 0:
-			if True:
-				stream_position = eval(sp)['z']-1
-				hdfs_str  = data_package.stream_hdfs_file_name
-				hdfs_addr = hdfs_str[:hdfs_str.rfind('/')]
-				hdfs_path = hdfs_str[hdfs_str.rfind('/')+1:]
-	
-				# for local data load
-				#data_package.file_name += data_package.stream_file_list[stream_position]
-				#data_package.file_name = '/local/whchoi/data/stream/'+data_package.stream_file_list[stream_position]
-	
-				#print data_package.info()
-				#print u, ss, sp, device_number
-	  			
-				import time
-				t_before = time.time()
-				data = load_from_hdfs(data_package, hdfs_addr, hdfs_path)
-	   			#print "END TO LOAD DATA from %d th sequence"%(stream_position)
-				t_diff = time.time() - t_before
-
-					
-					
-			data_list[u][ss][sp].data = data
-			data_list[u][ss][sp].devptr = data
-	   		#data_package.data = data
-
-
-		dest_package.split_data_range_streaming(streaming_cnt)
-
-		du, dss, dsp = dest_package.get_id()
-
-
-		# check data exist
-		dest_devptr = None
-		data_exist = False
-		usage = 0
-
-		if du in data_list:
-			if dss in data_list[du]:
-				if dsp in data_list[du][dss]:
-					dest_devptr = data_list[du][dss][dsp].devptr
-					usage = data_list[du][dss][dsp].data_bytes
-					data_exist = True
-
-		# data exist check
-		#is_new_data = check_new_data(data_exist, dest_devptr)
-		
-		# prepare dest_package and dest_devptr
-		#dest_package, dest_devptr = prepare_dest_package_and_dest_devptr(is_new_data, dest_package)
-		
-		dest_data_range = dest_package.data_range
-		dest_buffer_range = dest_package.buffer_range
-
-	
-		# write from temp data to dest data
-		for elem in recv_list[u][ss][sp]:
-			# wait data arrive
-
-			#MPI.Request.Wait(elem['request'])
-			t_data = elem['data']
-
-			t_devptr = t_data
-			elem['t_devptr'] = t_devptr
-				
-			
-			target = (u,ss,sp)
-			if target not in gpu_list:
-				gpu_list.append((u,ss,sp))
-
-	
-		#stream.synchronize()
-
-		dest_package.memory_type = numpy.ndarray
-		dest_package.data_dtype = numpy.ndarray
-		dest_package.devptr = dest_devptr
-		dest_package.data = t_data
-
-		if not data_exist:
-			if du not in data_list: data_list[du] = {}
-			if dss not in data_list[du]: data_list[du][dss] = {}
-		data_list[du][dss][dsp] = dest_package
-
-		del recv_list[u][ss][sp]
-		if recv_list[u][ss] == {}: del recv_list[u][ss]
-		if recv_list[u] == {}: del recv_list[u]
-
-
-	else:
-		# data already in here
-
-		target_dp = data_list[u][ss][sp]
-		
-
-		# prepare copy
-		#refresh dest_package
-		#data_package = data_package.copy()
-		data_package.split_data_range_streaming(streaming_cnt)
-
-
-		du, dss, dsp = data_package.get_id()
-
-		# check data exist
-		data_devptr = None
-		data_exist = False
-		usage = 0
-
-		if du in data_list:
-			if dss in data_list[du]:
-				if dsp in data_list[du][dss]:
-					data_devptr = data_list[du][dss][dsp].devptr
-					usage = data_list[du][dss][dsp].data_bytes
-					data_exist = True
-
-		# data exist check
-		is_new_data = check_new_data(data_exist, data_devptr)
-		
-		# prepare dest_package and dest_devptr
-		data_package, data_devptr = prepare_dest_package_and_dest_devptr(is_new_data, data_package)
-		
-		data_data_range = data_package.data_range
-		data_buffer_range = data_package.buffer_range
-
-		t_data = split_data_in_cpu(target_dp.data, data_package, target_dp.split_position)
-
-		
-		if type(t_data) == numpy.ndarray and gmem_set:
-			t_devptr, usage = malloc_with_swap_out(data_package.data_bytes)
-			#print t_data[0][0], t_devptr, gmem_set
-			# def copy rectangular
-			cuda.memcpy_htod_async(t_devptr, t_data, stream=stream)
-			#print "COPIED",t_devptr, data_package.get_id()
-			#print data_package.info(), data_package.memory_type
-			#elem['t_devptr'] = t_devptr
-			#elem['usage'] = usage	
-			del(t_data)
-		else:
-			t_devptr = t_data
-			#elem['t_devptr'] = t_devptr
-			
-		target = (u,ss,sp)
-		if target not in gpu_list:
-			gpu_list.append((u,ss,sp))
-
-		data_package.memory_type = 'devptr'
-		data_package.data_dtype = 'cuda_memory'
-		data_package.devptr = t_devptr
-		#print 'WRITING', data_package, du, dss, dsp
-
-		if not data_exist:
-			if du not in data_list: data_list[du] = {}
-			if dss not in data_list[du]: data_list[du][dss] = {}
-		data_list[du][dss][dsp] = data_package
-		#print data_list[du][dss][dsp]
-		#print "READING", data_list, data_package.memory_type
-		
-		pass
-
 def wait_data_arrive(data_package, stream=None):
 	# local_functions
 	#################################################################
@@ -614,6 +373,7 @@ def send(data, data_package, dest=None, gpu_direct=True):
 			#except:
 				#print "FAILED"
 				#pass
+			print buf.shape, dest
 
 			comm.send(buf, dest=dest, tag=57)
 
@@ -654,9 +414,11 @@ def recv():
 	dp = data_package
 	memory_type = dp.memory_type
 
+	print_bold("RECEIVING")
 
 	# if data exist on GPU and not hdfs
 	if memory_type == 'devptr' and not dp.stream:
+		print_bold("RECEIVING P1-1 %d"%source)
 		bytes = dp.data_bytes
 		devptr, usage = malloc_with_swap_out(bytes)
 		
@@ -673,14 +435,16 @@ def recv():
 
 		# blocking recv
 		buf = comm.recv(source=source, tag=57)
+		print_bold("RECEIVING P1-2")
 
-		#cuda.memcpy_htod(devptr, buf)
+		cuda.memcpy_htod(devptr, buf)
 
 		
 
 		return devptr, data_package, None, buf
 
 	else:
+		print_bold("RECEIVING P2")
 		bytes = dp.data_bytes
 		data_dtype = dp.data_dtype
 		if data_dtype == numpy.ndarray:
@@ -907,7 +671,7 @@ def memcpy_p2p_send(task, dest):
 			data = dest_devptr
 			stream_list[1].synchronize()
 
-			request = send(data, dp, dest=dest, gpu_direct=GPUDIRECT)
+			send(data, dp, dest=dest, gpu_direct=GPUDIRECT)
 
 		else:
 			#comm.isend(rank,				dest=0,	tag=25)
@@ -1335,8 +1099,10 @@ def compile_for_GPU(function_package, kernel_function_name='default'):
 
 		Vivaldi_code = function_code_dict[function_name]
 		dtype_dict = {}
-		if fp.stream:
+
+		if True:
 			dtype_dict['rb'] = fp.output.data_contents_dtype +'_volume'
+			#print_bold(dtype_dict['rb'])
 
 		
 		function_code = translate_to_CUDA(Vivaldi_code=Vivaldi_code, function_name=function_name, function_arguments=fp.function_args, dtype_dict=dtype_dict)
@@ -1347,7 +1113,7 @@ def compile_for_GPU(function_package, kernel_function_name='default'):
 
 		if True: # print for debugging
 			f = open('asdf.cu','w')
-			f.write(kernel_code)
+			f.write(kernel_code) 
 			f.close()
 			f = open('cuda_code.cu','w')
 			f.write(kernel_code)
@@ -1555,7 +1321,6 @@ def gpu_mem_check_and_free():
 
 
 	if catched:
-		#print_bold("freed")
 		devptr_and_timestamp.remove(target)
 		target['devptr'].free()
 
@@ -1576,6 +1341,11 @@ def dirt_devptr(devptr):
 	for _elem in devptr_and_timestamp:
 		if devptr == _elem['devptr']:
 			_elem['updated'] = False
+			break
+
+	#print_green(devptr_and_timestamp)
+
+		
 
 	
 
@@ -1615,6 +1385,7 @@ def mem_check_and_malloc(bytes):
 			fm,tm = cuda.mem_get_info()
 			log_str = "RANK %d, GPU MALLOC AFTER: %s Free, %s Maximum, %s Want to use"%(rank, print_bytes(fm),print_bytes(tm),print_bytes(bytes))
 			log(log_str, 'memory', log_type)
+		#print_green( devptr_and_timestamp)
 		return True, devptr
 
 	# we don't have enough memory
@@ -1656,6 +1427,7 @@ def find_reusable(bytes):
 
 	return False, None, 0
 def malloc_with_swap_out(bytes, arg_lock=[], debug_trace=False):
+
 	#if debug_trace == False:
 		#print bytes
 		#assert(False)
@@ -1854,6 +1626,7 @@ def run_function(function_package, function_name):
 	if False:
 		pass
 	else:
+		used_devptr = []
 		cuda_args = []
 	
 		data_exist = True
@@ -1892,7 +1665,6 @@ def run_function(function_package, function_name):
 			buffer_range = func_output.buffer_range
 			buffer_halo = func_output.buffer_halo
 
-			#print_blue(func_output.info())
 		
 			ad = data_range_to_cuda_in(data_range, full_data_range, buffer_range, buffer_halo=buffer_halo, stream=stream)
 	
@@ -1959,7 +1731,8 @@ def run_function(function_package, function_name):
 					#print_green(socket.gethostname())
 					#print_green(data_package.info())
 
-					dirt_devptr(data_package.devptr)
+
+					used_devptr.append(data_package.devptr)
 
 					data_range = data_package.data_range
 					full_data_range = data_package.full_data_range
@@ -2007,6 +1780,9 @@ def run_function(function_package, function_name):
 	#	print_devptr(cuda_args[0], func_output)
 		u, ss, sp = func_output.get_id()
 		target = (u,ss,sp)
+
+		for used in used_devptr:
+			dirt_devptr(used)
 
 		#result_buffer = numpy.ndarray((1024,1024,4),dtype=numpy.uint8)
 		#cuda.memcpy_dtoh(result_buffer, cuda_args[0])
@@ -2113,8 +1889,6 @@ while flag != "finish":
 
 	source = comm.recv(source=MPI.ANY_SOURCE,    tag=5)
 	flag = comm.recv(source=source,              tag=5)
-
-	#print_red("GPU_UNIT from %s #%s# by source : %s"%(socket.gethostname(),str(flag), source))
 
 
 	if log_type != False: print "GPU:", rank, "source:", source, "flag:", flag 
@@ -2333,11 +2107,19 @@ while flag != "finish":
 					function_and_kernel_mapping[function_name].append(kernel_function_name)
 
 			# update dirty flag for devptr
-			#for elem in function_package.function_args:
-				#print_bold( elem.data_source)
-				#if elem.devptr != None:
-					#update_devptr_timestamp(devptr)
-					
+			for elem in function_package.function_args:
+				u, ss, sp = elem.get_id()
+
+				if u != -1:
+					if u in data_list:
+						if ss in data_list[u]:
+							if sp in data_list[u][ss]:
+								if data_list[u][ss][sp].devptr != None :
+									elem.devptr = data_list[u][ss][sp].devptr
+									elem.memory_type = data_list[u][ss][sp].memory_type
+
+									update_devptr_timestamp(elem.devptr)
+
 					
 			devptr, output_package = run_function(function_package, kernel_function_name)
 			

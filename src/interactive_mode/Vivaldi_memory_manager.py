@@ -1231,7 +1231,7 @@ def select_dest_by_byte_order(bytes_list, u, ss, SP_list, execid_list, data_pack
 	# FREYJA STREAMING
 	if max == 0:
 		#if data_pack.data_source in ['local', 'hdfs']:
-		if VIVALDI_LOCALITY:
+		if VIVALDI_LOCALITY and data_pack.data_source in ['local', 'hdfs']:
 			sp = data_pack.get_split_position()
 			ss = data_pack.get_split_shape()
 			stream_position = eval(sp)['z']-1
